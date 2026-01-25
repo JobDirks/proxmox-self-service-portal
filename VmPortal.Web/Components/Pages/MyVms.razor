@@ -1,0 +1,140 @@
+@page "/my-vms"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@using Microsoft.EntityFrameworkCore
+@using VmPortal.Infrastructure.Data
+@using VmPortal.Domain.Vms
+@using VmPortal.Domain.Users
+@using VmPortal.Domain.Actions
+@using VmPortal.Application.Proxmox
+@inject VmPortalDbContext Db
+@inject IProxmoxClient Proxmox
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider Auth
+
+<h1>My VMs</h1>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else if (_vms.Count == 0)
+{
+    <p>No VMs linked to your account.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Node</th>
+                <th>VMID</th>
+                <th>Status</th>
+                <th>CPU</th>
+                <th>RAM (MiB)</th>
+                <th>Disk (GiB)</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (Vm vm in _vms)
+            {
+                <tr>
+                    <td>@vm.Name</td>
+                    <td>@vm.Node</td>
+                    <td>@vm.VmId</td>
+                    <td>@vm.Status</td>
+                    <td>@vm.CpuCores</td>
+                    <td>@vm.MemoryMiB</td>
+                    <td>@vm.DiskGiB</td>
+                    <td>
+                        <button class="btn btn-sm btn-success" @onclick="() => StartVmAsync(vm)">Start</button>
+                        <button class="btn btn-sm btn-warning" @onclick="() => StopVmAsync(vm)">Stop</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => ShutdownVmAsync(vm)">Shutdown</button>
+                        <button class="btn btn-sm btn-secondary" @onclick="() => RefreshStatusAsync(vm)">Refresh</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private Guid _currentUserId;
+    private bool _loading = true;
+    private List<Vm> _vms = new List<Vm>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await Auth.GetAuthenticationStateAsync();
+        var principal = state.User;
+
+        string? externalId =
+            principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? principal.FindFirst("sub")?.Value;
+
+        if (string.IsNullOrEmpty(externalId))
+        {
+            _loading = false;
+            return;
+        }
+
+        User? user = await Db.Users.FirstOrDefaultAsync(u => u.ExternalId == externalId);
+        if (user == null)
+        {
+            _loading = false;
+            return;
+        }
+
+        _currentUserId = user.Id;
+        _vms = await Db.Vms.Where(v => v.OwnerUserId == _currentUserId)
+                           .OrderBy(v => v.Name)
+                           .ToListAsync();
+        _loading = false;
+    }
+
+    private async Task RefreshStatusAsync(Vm vm)
+    {
+        VmStatus status = await Proxmox.GetVmStatusAsync(vm.Node, vm.VmId);
+        vm.Status = status;
+        vm.LastSyncedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+    }
+
+    private async Task StartVmAsync(Vm vm)
+    {
+        await Proxmox.StartVmAsync(vm.Node, vm.VmId);
+        await LogActionAsync("StartVm", vm);
+        await RefreshStatusAsync(vm);
+    }
+
+    private async Task StopVmAsync(Vm vm)
+    {
+        await Proxmox.StopVmAsync(vm.Node, vm.VmId);
+        await LogActionAsync("StopVm", vm);
+        await RefreshStatusAsync(vm);
+    }
+
+    private async Task ShutdownVmAsync(Vm vm)
+    {
+        await Proxmox.ShutdownVmAsync(vm.Node, vm.VmId);
+        await LogActionAsync("ShutdownVm", vm);
+        await RefreshStatusAsync(vm);
+    }
+
+    private async Task LogActionAsync(string action, Vm vm)
+    {
+        UserAction ua = new UserAction
+        {
+            Id = Guid.NewGuid(),
+            UserId = _currentUserId,
+            ActionName = action,
+            TargetType = "Vm",
+            TargetId = $"{vm.Node}:{vm.VmId}",
+            MetadataJson = "",
+            OccurredAt = DateTimeOffset.UtcNow
+        };
+        Db.UserActions.Add(ua);
+        await Db.SaveChangesAsync();
+    }
+}

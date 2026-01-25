@@ -1,0 +1,92 @@
+@page "/admin/vms"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.EntityFrameworkCore
+@using VmPortal.Infrastructure.Data
+@using VmPortal.Domain.Vms
+@using VmPortal.Domain.Users
+@using VmPortal.Application.Proxmox
+@inject VmPortalDbContext Db
+@inject IProxmoxClient Proxmox
+
+<h1>Admin: All VMs</h1>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Owner</th>
+                <th>Name</th>
+                <th>Node</th>
+                <th>VMID</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (Vm vm in _vms)
+            {
+                User? owner = _owners.TryGetValue(vm.OwnerUserId, out User? o) ? o : null;
+                <tr>
+                    <td>@owner?.DisplayName (@owner?.Email)</td>
+                    <td>@vm.Name</td>
+                    <td>@vm.Node</td>
+                    <td>@vm.VmId</td>
+                    <td>@vm.Status</td>
+                    <td>
+                        <button class="btn btn-sm btn-success" @onclick="() => StartVmAsync(vm)">Start</button>
+                        <button class="btn btn-sm btn-warning" @onclick="() => StopVmAsync(vm)">Stop</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => ShutdownVmAsync(vm)">Shutdown</button>
+                        <button class="btn btn-sm btn-secondary" @onclick="() => RefreshStatusAsync(vm)">Refresh</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private List<Vm> _vms = new List<Vm>();
+    private Dictionary<Guid, User> _owners = new Dictionary<Guid, User>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _vms = await Db.Vms.OrderBy(v => v.Name).ToListAsync();
+        List<Guid> ownerIds = _vms.Select(v => v.OwnerUserId).Distinct().ToList();
+        List<User> users = await Db.Users.Where(u => ownerIds.Contains(u.Id)).ToListAsync();
+        _owners = users.ToDictionary(u => u.Id, u => u);
+        _loading = false;
+    }
+
+    private async Task RefreshStatusAsync(Vm vm)
+    {
+        VmStatus status = await Proxmox.GetVmStatusAsync(vm.Node, vm.VmId);
+        vm.Status = status;
+        vm.LastSyncedAt = DateTimeOffset.UtcNow;
+        await Db.SaveChangesAsync();
+    }
+
+    private async Task StartVmAsync(Vm vm)
+    {
+        await Proxmox.StartVmAsync(vm.Node, vm.VmId);
+        await RefreshStatusAsync(vm);
+    }
+
+    private async Task StopVmAsync(Vm vm)
+    {
+        await Proxmox.StopVmAsync(vm.Node, vm.VmId);
+        await RefreshStatusAsync(vm);
+    }
+
+    private async Task ShutdownVmAsync(Vm vm)
+    {
+        await Proxmox.ShutdownVmAsync(vm.Node, vm.VmId);
+        await RefreshStatusAsync(vm);
+    }
+}
