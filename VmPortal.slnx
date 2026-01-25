@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="VmPortal.Application/VmPortal.Application.csproj" />
+  <Project Path="VmPortal.Domain/VmPortal.Domain.csproj" />
+  <Project Path="VmPortal.Infrastructure/VmPortal.Infrastructure.csproj" />
+  <Project Path="VmPortal.Web/VmPortal.Web.csproj" />
+</Solution>

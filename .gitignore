@@ -1,0 +1,27 @@
+# Build and IDE
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and temp
+*.log
+logs/
+*.trace
+*.tmp
+
+# Secrets and local config
+secrets.json
+appsettings.*.local.json
+
+# SQLite and data
+*.db
+data/
+vmportal.db
+
+# Node artifacts (if used later)
+node_modules/
+dist/
