@@ -3,6 +3,17 @@
   <ItemGroup>
     <ProjectReference Include="..\VmPortal.Application\VmPortal.Application.csproj" />
     <ProjectReference Include="..\VmPortal.Domain\VmPortal.Domain.csproj" />
+    <ProjectReference Include="..\VmPortal.Infrastructure\VmPortal.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.3.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
