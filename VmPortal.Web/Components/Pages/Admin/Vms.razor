@@ -1,4 +1,5 @@
 @page "/admin/vms"
+@rendermode InteractiveServer
 @using Microsoft.AspNetCore.Authorization
 @attribute [Authorize(Policy = VmPortal.Domain.Security.SecurityConstants.Policies.Admin)]
 @inherits SecureComponentBase

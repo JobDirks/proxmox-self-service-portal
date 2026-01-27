@@ -6,10 +6,12 @@ namespace VmPortal.Infrastructure.Security
 {
     internal partial class InputSanitizer : IInputSanitizer
     {
-        [GeneratedRegex(@"^[a-zA-Z0-9\-_\.]{1,50}$")]
+        // Allow letters, numbers, spaces, '-', '_', '.' for VM names (length 1–100)
+        [GeneratedRegex(@"^[\p{L}\p{N}\s\-_\.]{1,100}$")]
         private static partial Regex VmNameRegex();
 
-        [GeneratedRegex(@"^[a-zA-Z0-9\-_]{1,30}$")]
+        // Allow typical hostname characters: letters, numbers, '-', '.', '_' (length 1–100)
+        [GeneratedRegex(@"^[a-zA-Z0-9\-_\.]{1,100}$")]
         private static partial Regex NodeNameRegex();
 
         [GeneratedRegex(@"[<>""'&]")]
@@ -33,14 +35,13 @@ namespace VmPortal.Infrastructure.Security
 
         public bool IsValidVmId(int vmId)
         {
-            return vmId > 0 && vmId <= 999999; // Proxmox VMID range
+            return vmId > 0 && vmId <= 999999;
         }
 
         public string SanitizeForDisplay(string input)
         {
             if (string.IsNullOrEmpty(input)) return string.Empty;
 
-            // HTML encode dangerous characters
             return HtmlCharsRegex().Replace(input, match => match.Value switch
             {
                 "<" => "&lt;",
@@ -56,7 +57,6 @@ namespace VmPortal.Infrastructure.Security
         {
             if (string.IsNullOrEmpty(input)) return string.Empty;
 
-            // Remove control characters and limit length for logging
             string cleaned = Regex.Replace(input, @"[\x00-\x1F\x7F]", "");
             return cleaned.Length > 200 ? cleaned[..200] + "..." : cleaned;
         }

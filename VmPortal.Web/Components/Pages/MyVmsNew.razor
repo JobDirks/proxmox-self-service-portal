@@ -1,0 +1,271 @@
+@page "/my-vms/new"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inherits SecureComponentBase
+@using Microsoft.EntityFrameworkCore
+@using VmPortal.Infrastructure.Data
+@using VmPortal.Domain.Vms
+@using VmPortal.Domain.Users
+@using VmPortal.Application.Security
+@using VmPortal.Application.Proxmox
+@inject VmPortalDbContext Db
+@inject IInputSanitizer Sanitizer
+@inject NavigationManager Nav
+@inject IProxmoxClient Proxmox
+
+<PageTitle>Create VM</PageTitle>
+
+<h1>Create Virtual Machine</h1>
+
+@if (_loading)
+{
+    <div class="d-flex justify-content-center py-4">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_templates.Count == 0)
+{
+    <div class="alert alert-info">
+        <h4 class="alert-heading"><i class="fas fa-info-circle"></i> No Templates Available</h4>
+        <p>No VM templates are defined. Contact your administrator.</p>
+    </div>
+}
+else
+{
+    <EditForm Model="_model"
+              OnValidSubmit="CreateVmAsync"
+              FormName="CreateVmForm">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Template</label>
+            <InputSelect class="form-select" @bind-Value="_model.TemplateId">
+                <option value="">-- Select Template --</option>
+                @foreach (VmTemplate template in _templates)
+                {
+                    <option value="@template.Id">@template.Name (@template.Node / @template.TemplateVmId)</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">VM Name</label>
+            <InputText class="form-control" @bind-Value="_model.Name" />
+            <div class="form-text">Letters, numbers, spaces, '-', '_' and '.' are allowed.</div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-4">
+                <label class="form-label">CPU Cores</label>
+                <InputNumber class="form-control" @bind-Value="_model.CpuCores" />
+            </div>
+            <div class="col-4">
+                <label class="form-label">RAM (MiB)</label>
+                <InputNumber class="form-control" @bind-Value="_model.MemoryMiB" />
+            </div>
+            <div class="col-4">
+                <label class="form-label">Disk (GiB)</label>
+                <InputNumber class="form-control" @bind-Value="_model.DiskGiB" />
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@_saving">
+            @if (_saving)
+            {
+                <span class="spinner-border spinner-border-sm me-2"></span>
+            }
+            Create VM
+        </button>
+        <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">
+            Cancel
+        </button>
+    </EditForm>
+}
+
+@code {
+    private List<VmTemplate> _templates = new List<VmTemplate>();
+    private CreateVmModel _model = new CreateVmModel();
+    private bool _loading = true;
+    private bool _saving = false;
+    private Guid _currentUserDbId;
+
+    private sealed class CreateVmModel
+    {
+        public Guid? TemplateId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public int CpuCores { get; set; } = 2;
+        public int MemoryMiB { get; set; } = 2048;
+        public int DiskGiB { get; set; } = 20;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(CurrentUserId))
+            {
+                _loading = false;
+                return;
+            }
+
+            User? user = await Db.Users.FirstOrDefaultAsync(u => u.ExternalId == CurrentUserId);
+            if (user == null)
+            {
+                _loading = false;
+                return;
+            }
+
+            _currentUserDbId = user.Id;
+
+            _templates = await Db.VmTemplates
+                .Where(t => t.IsActive)
+                .OrderBy(t => t.Name)
+                .ToListAsync();
+
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load templates for user {UserId}", CurrentUserId);
+            await LogSecurityEventAsync("VmCreateLoadFailed", ex.Message, "Error");
+            _loading = false;
+        }
+    }
+
+    private async Task CreateVmAsync()
+    {
+        if (_saving)
+        {
+            return;
+        }
+
+        _saving = true;
+
+        try
+        {
+            if (_model.TemplateId == null)
+            {
+                await LogSecurityEventAsync("VmCreateValidationFailed", "TemplateId is null", "Warning");
+                _saving = false;
+                return;
+            }
+
+            VmTemplate? template = await Db.VmTemplates.FirstOrDefaultAsync(t => t.Id == _model.TemplateId.Value);
+            if (template == null || !template.IsActive)
+            {
+                await LogSecurityEventAsync("VmCreateValidationFailed", "Template not found or inactive", "Warning");
+                _saving = false;
+                return;
+            }
+
+            string name = Sanitizer.SanitizeVmName(_model.Name);
+            if (string.IsNullOrEmpty(name))
+            {
+                await LogSecurityEventAsync("VmCreateValidationFailed", "Invalid VM name", "Warning");
+                _saving = false;
+                return;
+            }
+
+            // Proxmox requires a DNS-compatible VM name: letters, digits, '-', '.'; no spaces or underscores.
+            bool isDnsName = true;
+            for (int i = 0; i < name.Length; i++)
+            {
+                char ch = name[i];
+                if (!char.IsLetterOrDigit(ch) && ch != '-' && ch != '.')
+                {
+                    isDnsName = false;
+                    break;
+                }
+            }
+
+            // additionally disallow starting/ending with '-' or '.'
+            if (!isDnsName || name.StartsWith("-", StringComparison.Ordinal) || name.EndsWith("-", StringComparison.Ordinal) ||
+                name.StartsWith(".", StringComparison.Ordinal) || name.EndsWith(".", StringComparison.Ordinal))
+            {
+                await LogSecurityEventAsync("VmCreateValidationFailed",
+                    $"VM name '{name}' is not DNS-compatible", "Warning");
+                _saving = false;
+                return;
+            }
+
+            if (_model.CpuCores <= 0 || _model.MemoryMiB <= 0 || _model.DiskGiB <= 0)
+            {
+                await LogSecurityEventAsync("VmCreateValidationFailed", "Invalid resource values", "Warning");
+                _saving = false;
+                return;
+            }
+
+            // Call Proxmox clone API
+            ProxmoxCloneResult cloneResult;
+            try
+            {
+                cloneResult = await Proxmox.CloneVmAsync(
+                    template.Node,
+                    template.TemplateVmId,
+                    name,
+                    _model.CpuCores,
+                    _model.MemoryMiB,
+                    _model.DiskGiB,
+                    default);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Proxmox clone failed for template {TemplateVmId} on node {Node}", template.TemplateVmId, template.Node);
+                await LogSecurityEventAsync("VmCloneFailed",
+                    $"Template: {template.Name} ({template.TemplateVmId}), Error: {ex.Message}",
+                    "Error");
+                _saving = false;
+                return;
+            }
+
+            await LogSecurityEventAsync("VmCloneRequested",
+                $"Template: {template.Name} ({template.TemplateVmId}), New VM: {name}, TaskId: {cloneResult.TaskId}, VmId: {cloneResult.VmId}",
+                "Information");
+
+            // DB record with the real VMID from Proxmox
+            Vm vm = new Vm
+            {
+                Id = Guid.NewGuid(),
+                VmId = cloneResult.VmId,
+                Node = template.Node,
+                Name = name,
+                Status = VmStatus.Stopped,
+                CpuCores = _model.CpuCores,
+                MemoryMiB = _model.MemoryMiB,
+                DiskGiB = _model.DiskGiB,
+                LastSyncedAt = DateTimeOffset.UtcNow,
+                OwnerUserId = _currentUserDbId
+            };
+
+            Db.Vms.Add(vm);
+            await Db.SaveChangesAsync();
+
+            await LogSecurityEventAsync("VmCreatedFromTemplate",
+                $"Template: {template.Name} ({template.TemplateVmId}), VM: {name}, VmId: {cloneResult.VmId}, CloneTaskId: {cloneResult.TaskId}",
+                "Information");
+
+            Nav.NavigateTo("/my-vms");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create VM from template for user {UserId}", CurrentUserId);
+            await LogSecurityEventAsync("VmCreateFromTemplateFailed", ex.Message, "Error");
+            _saving = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        Nav.NavigateTo("/my-vms");
+    }
+}

@@ -1,4 +1,3 @@
-using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using VmPortal.Domain.Vms;
@@ -11,6 +10,16 @@ namespace VmPortal.Application.Proxmox
         Task StartVmAsync(string node, int vmId, CancellationToken ct = default);
         Task StopVmAsync(string node, int vmId, CancellationToken ct = default);
         Task ShutdownVmAsync(string node, int vmId, CancellationToken ct = default);
-        // Add more actions (Pause/Resume, Resize, CloneFromTemplate) later
+
+        Task<ProxmoxCloneResult> CloneVmAsync(
+            string node,
+            int templateVmId,
+            string newName,
+            int cpuCores,
+            int memoryMiB,
+            int diskGiB,
+            CancellationToken ct = default);
+
+        Task<int> GetNextVmIdAsync(CancellationToken ct = default);
     }
 }

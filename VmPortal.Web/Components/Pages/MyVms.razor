@@ -1,4 +1,5 @@
 @page "/my-vms"
+@rendermode InteractiveServer
 @using Microsoft.AspNetCore.Authorization
 @attribute [Authorize]
 @inherits SecureComponentBase
@@ -84,25 +85,25 @@ else
                                 <button type="button"
                                         class="btn @(vm.Status == VmStatus.Running ? "btn-outline-secondary" : "btn-outline-success")"
                                         @onclick="() => StartVmAsync(vm)"
-                                        disabled="@(_operationInProgress || vm.Status == VmStatus.Running || _rateLimitCooldown.HasValue)">
+                                        disabled="@(_operationInProgress || vm.Status == VmStatus.Running || _rateLimitCooldown.HasValue || vm.VmId <= 0)">
                                     <i class="fas fa-play"></i>
                                 </button>
                                 <button type="button"
                                         class="btn @(vm.Status == VmStatus.Stopped ? "btn-outline-secondary" : "btn-outline-warning")"
                                         @onclick="() => StopVmAsync(vm)"
-                                        disabled="@(_operationInProgress || vm.Status == VmStatus.Stopped || _rateLimitCooldown.HasValue)">
+                                        disabled="@(_operationInProgress || vm.Status == VmStatus.Stopped || _rateLimitCooldown.HasValue || vm.VmId <= 0)">
                                     <i class="fas fa-stop"></i>
                                 </button>
                                 <button type="button"
                                         class="btn @(vm.Status == VmStatus.Stopped ? "btn-outline-secondary" : "btn-outline-danger")"
                                         @onclick="() => ShutdownVmAsync(vm)"
-                                        disabled="@(_operationInProgress || vm.Status == VmStatus.Stopped || _rateLimitCooldown.HasValue)">
+                                        disabled="@(_operationInProgress || vm.Status == VmStatus.Stopped || _rateLimitCooldown.HasValue || vm.VmId <= 0)">
                                     <i class="fas fa-power-off"></i>
                                 </button>
                                 <button type="button"
                                         class="btn btn-outline-info"
                                         @onclick="() => RefreshStatusAsync(vm)"
-                                        disabled="@(_operationInProgress && _currentVm?.Id == vm.Id)">
+                                        disabled="@(_operationInProgress && _currentVm?.Id == vm.Id || vm.VmId <= 0)">
                                     <i class="fas fa-sync-alt"></i>
                                 </button>
                             </div>
