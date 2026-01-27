@@ -1,13 +1,21 @@
 using System;
 using System.Net.Http;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using Polly.Extensions.Http;
 using VmPortal.Application.Proxmox;
+using VmPortal.Application.Security;
+using VmPortal.Application.Security.Requirements;
 using VmPortal.Infrastructure.Data;
 using VmPortal.Infrastructure.Proxmox;
+using VmPortal.Infrastructure.Security;
+using VmPortal.Infrastructure.Security.Handlers;
 
 namespace VmPortal.Infrastructure
 {
@@ -15,6 +23,7 @@ namespace VmPortal.Infrastructure
     {
         public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
         {
+            // Database connection (no password - use field-level encryption instead)
             string conn = configuration.GetConnectionString("Default") ?? "Data Source=./data/vmportal.db";
             services.AddDbContext<VmPortalDbContext>(options => options.UseSqlite(conn));
 
@@ -22,17 +31,33 @@ namespace VmPortal.Infrastructure
             services.AddHealthChecks()
                     .AddDbContextCheck<VmPortalDbContext>("db");
 
+            // Security services
+            services.Configure<SecurityOptions>(configuration.GetSection("Security"));
+            services.AddMemoryCache();
+
+            // Data protection with EF Core key persistence (field-level encryption)
+            services.AddDataProtection()
+                    .PersistKeysToDbContext<VmPortalDbContext>();
+
+            services.AddScoped<IDataProtectionService, DataProtectionService>();
+            services.AddScoped<ISecureSessionManager, SecureSessionManager>();
+            services.AddScoped<ISecurityEventLogger, SecurityEventLogger>();
+            services.AddScoped<IRateLimitingService, RateLimitingService>();
+            services.AddScoped<IInputSanitizer, InputSanitizer>();
+
+            // Authorization handlers
+            services.AddScoped<IAuthorizationHandler, SecureSessionAuthorizationHandler>();
+
+            // Proxmox client configuration
             services.Configure<ProxmoxOptions>(configuration.GetSection("Proxmox"));
 
-            // Resilience policies
             IAsyncPolicy<HttpResponseMessage> retry = HttpPolicyExtensions
                 .HandleTransientHttpError()
-                .WaitAndRetryAsync(new[]
-                {
+                .WaitAndRetryAsync([
                     TimeSpan.FromSeconds(1),
                     TimeSpan.FromSeconds(2),
                     TimeSpan.FromSeconds(5)
-                });
+                ]);
 
             IAsyncPolicy<HttpResponseMessage> timeout = Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(15));
 

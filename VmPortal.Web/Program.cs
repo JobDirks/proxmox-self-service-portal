@@ -1,10 +1,16 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using VmPortal.Web.Components;
 using VmPortal.Infrastructure;
 using VmPortal.Infrastructure.Data;
+using VmPortal.Application.Security;
+using VmPortal.Application.Security.Requirements;
+using VmPortal.Domain.Security;
+using VmPortal.Web.Extensions;
+using VmPortal.Web.Middleware;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 
@@ -14,10 +20,24 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Infrastructure
+// Session support for secure session management
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(480); // 8 hours
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+});
+
+// Infrastructure (DbContext, Proxmox, Security services)
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Authentication + Authorization (Entra ID)
+// HTTP Context Accessor for authorization handlers
+builder.Services.AddHttpContextAccessor();
+
+// Authentication + Authorization (Entra ID with enhanced security)
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(options =>
     {
@@ -25,39 +45,44 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
         options.ResponseType = "code";
         options.UsePkce = true;
         options.SaveTokens = true;
+
         options.Events = new OpenIdConnectEvents
         {
             OnTokenValidated = async ctx =>
             {
                 ILogger<Program> log = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
                 VmPortalDbContext db = ctx.HttpContext.RequestServices.GetRequiredService<VmPortalDbContext>();
+                ISecurityEventLogger securityLogger = ctx.HttpContext.RequestServices.GetRequiredService<ISecurityEventLogger>();
+                ISecureSessionManager sessionManager = ctx.HttpContext.RequestServices.GetRequiredService<ISecureSessionManager>();
+
                 ClaimsPrincipal principal = ctx.Principal!;
                 ClaimsIdentity identity = (ClaimsIdentity)principal.Identity!;
 
-                // Normalize roles: copy any “roles” claims into ClaimTypes.Role so [Authorize(Roles="Admin")] works
-                var roleValues = identity.FindAll("roles").Select(c => c.Value).ToList();
-                var existingRoleValues = identity.FindAll(ClaimTypes.Role).Select(c => c.Value);
-                foreach (string r in roleValues.Except(existingRoleValues))
+                // Normalize roles: copy "roles" claims to ClaimTypes.Role
+                string[] roleValues = [.. identity.FindAll("roles").Select(c => c.Value)];
+                string[] existingRoleValues = [.. identity.FindAll(ClaimTypes.Role).Select(c => c.Value)];
+                foreach (string role in roleValues.Except(existingRoleValues))
                 {
-                    identity.AddClaim(new Claim(ClaimTypes.Role, r));
+                    identity.AddClaim(new Claim(ClaimTypes.Role, role));
                 }
-                log.LogInformation("Roles in principal: {roles}", identity.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray());
 
-                // User upsert (no local role storage)
-                string externalId =
-                    principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                    ?? principal.FindFirst("sub")?.Value
-                    ?? string.Empty;
-                string email =
-                    principal.FindFirst("preferred_username")?.Value
-                    ?? principal.FindFirst(ClaimTypes.Email)?.Value
-                    ?? string.Empty;
-                string name = principal.FindFirst(ClaimTypes.Name)?.Value ?? email;
+                // Generate secure session hash
+                string sessionId = ctx.HttpContext.Session.Id;
+                string sessionHash = sessionManager.GenerateSessionHash(principal, sessionId);
+                identity.AddClaim(new Claim(SecurityConstants.ClaimTypes.SessionHash, sessionHash));
+
+                log.LogInformation("User authenticated: {UserId} with roles: {Roles}",
+                    principal.GetObjectId(), string.Join(", ", principal.GetRoles()));
+
+                // User upsert (no local role storage) - use Microsoft.Identity.Web extensions
+                string? externalId = principal.GetObjectId();
+                string email = principal.GetPreferredUsername();
+                string name = principal.GetDisplayName() ?? email;
                 string username = email;
 
                 if (!string.IsNullOrEmpty(externalId))
                 {
-                    var user = await db.Users.FirstOrDefaultAsync(u => u.ExternalId == externalId);
+                    VmPortal.Domain.Users.User? user = await db.Users.FirstOrDefaultAsync(u => u.ExternalId == externalId);
                     if (user == null)
                     {
                         user = new VmPortal.Domain.Users.User
@@ -71,6 +96,15 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
                             IsActive = true
                         };
                         db.Users.Add(user);
+                        await securityLogger.LogSecurityEventAsync(new SecurityEvent
+                        {
+                            Id = Guid.NewGuid(),
+                            EventType = "UserCreated",
+                            UserId = externalId,
+                            IpAddress = ctx.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "",
+                            Details = $"Email: {email}, Name: {name}",
+                            Severity = "Information"
+                        });
                     }
                     else
                     {
@@ -79,38 +113,71 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
                         user.DisplayName = name;
                     }
                     await db.SaveChangesAsync();
+
+                    // Log successful authentication
+                    await securityLogger.LogLoginAttemptAsync(externalId,
+                        ctx.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "", true);
                 }
+            },
+
+            OnAuthenticationFailed = async ctx =>
+            {
+                ISecurityEventLogger securityLogger = ctx.HttpContext.RequestServices.GetRequiredService<ISecurityEventLogger>();
+                await securityLogger.LogLoginAttemptAsync("unknown",
+                    ctx.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "", false,
+                    ctx.Exception?.Message ?? "Authentication failed");
             }
         };
     });
-// Prefer default RoleClaimType to ClaimTypes.Role after normalization
+
+// Enhanced authorization with secure session policies
 builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, options =>
 {
     options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
     options.TokenValidationParameters.NameClaimType = "name";
 });
 
-// Authorization builder for Admin policy and fallback (authenticated users)
-var auth = builder.Services.AddAuthorizationBuilder();
-auth.AddPolicy("Admin", p => p.RequireRole("Admin"));
-builder.Services.AddAuthorization(options =>
+IServiceCollection authBuilder = builder.Services.AddAuthorization(options =>
 {
-    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
-    .RequireAuthenticatedUser()
-    .Build();
+    // Fallback policy (all authenticated users)
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+
+    // Admin policy
+    options.AddPolicy(SecurityConstants.Policies.Admin, policy =>
+        policy.RequireRole(SecurityConstants.Roles.Admin));
+
+    // Employee policy (explicit)
+    options.AddPolicy(SecurityConstants.Policies.Employee, policy =>
+        policy.RequireAuthenticatedUser()
+        .RequireAssertion(ctx =>
+            ctx.User.IsInRole(SecurityConstants.Roles.Employee) ||
+            ctx.User.IsInRole(SecurityConstants.Roles.Admin)));
+
+    // Secure session policy
+    options.AddPolicy(SecurityConstants.Policies.SecureSession, policy =>
+        policy.RequireAuthenticatedUser()
+        .AddRequirements(new SecureSessionRequirement()));
 });
 
 WebApplication app = builder.Build();
 
+// Security middleware pipeline
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
 
+// Custom security headers
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
 
+// Session must come before Authentication
+app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -120,6 +187,7 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
+// Enhanced login/logout with security logging
 app.MapGet("/login", async ctx =>
 {
     await ctx.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme,
@@ -128,6 +196,23 @@ app.MapGet("/login", async ctx =>
 
 app.MapGet("/logout", async ctx =>
 {
+    ISecurityEventLogger? securityLogger = ctx.RequestServices.GetService<ISecurityEventLogger>();
+    if (securityLogger != null && ctx.User?.Identity?.IsAuthenticated == true)
+    {
+        string? userId = ctx.User.GetObjectId();
+        if (!string.IsNullOrEmpty(userId))
+        {
+            await securityLogger.LogSecurityEventAsync(new SecurityEvent
+            {
+                Id = Guid.NewGuid(),
+                EventType = "UserLogout",
+                UserId = userId,
+                IpAddress = ctx.Connection.RemoteIpAddress?.ToString() ?? "",
+                Severity = "Information"
+            });
+        }
+    }
+
     await ctx.SignOutAsync();
     await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme,
         new AuthenticationProperties { RedirectUri = "/" });

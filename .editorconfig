@@ -30,3 +30,15 @@ dotnet_naming_style.camel_with_underscore.capitalization = camel_case
 
 [VmPortal.Application/Proxmox/IProxmoxClient.cs]
 dotnet_diagnostic.IDE0040.severity = none
+
+[VmPortal.Application/Security/*.cs]
+dotnet_diagnostic.IDE0040.severity = none
+
+[*.razor]
+dotnet_diagnostic.HTML0209.severity = none
+
+[VmPortal.Infrastructure/Security/InputSanitizer.cs]
+dotnet_diagnostic.SYSLIB1045.severity = silent
+
+[*.cs]
+dotnet_diagnostic.IDE0007.severity = none

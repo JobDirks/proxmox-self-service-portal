@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VmPortal.Infrastructure.Data;
 
@@ -10,29 +11,14 @@ using VmPortal.Infrastructure.Data;
 namespace VmPortal.Infrastructure.Migrations
 {
     [DbContext(typeof(VmPortalDbContext))]
-    partial class VmPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260127175716_AddSecurityEvents")]
+    partial class AddSecurityEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
-
-            modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("FriendlyName")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Xml")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("DataProtectionKeys");
-                });
 
             modelBuilder.Entity("VmPortal.Domain.Actions.UserAction", b =>
                 {
