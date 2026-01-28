@@ -19,9 +19,19 @@ appsettings.*.local.json
 
 # SQLite and data
 *.db
-data/
+#data/
 vmportal.db
 
 # Node artifacts (if used later)
 node_modules/
 dist/
+
+# SQLite DB
+/VmPortal.Web/data/vmportal.db
+/VmPortal.Web/data/*.db
+/VmPortal.Web/data/
+*.sqlite
+
+# User secrets and local env
+*.user
+.env
