@@ -1,5 +1,7 @@
 @page "/my-vms/new"
 @rendermode InteractiveServer
+@using System
+@using System.Linq
 @using Microsoft.AspNetCore.Authorization
 @attribute [Authorize]
 @inherits SecureComponentBase
@@ -9,11 +11,11 @@
 @using VmPortal.Domain.Users
 @using VmPortal.Application.Security
 @using VmPortal.Application.Proxmox
+@using VmPortal.Application.Vms
 @inject VmPortalDbContext Db
 @inject IInputSanitizer Sanitizer
 @inject NavigationManager Nav
 @inject IProxmoxClient Proxmox
-@using VmPortal.Application.Vms
 @inject Microsoft.Extensions.Options.IOptions<VmResourceLimitsOptions> VmLimitsOptions
 
 <PageTitle>Create VM</PageTitle>
@@ -37,6 +39,37 @@ else if (_templates.Count == 0)
 }
 else
 {
+    @if (_stage != CreateVmStage.None)
+    {
+        <div class="mb-3">
+            <strong>Provisioning steps</strong>
+            <ol class="mt-2">
+                <li class="@GetStepCss(CreateVmStage.Validating)">
+                    Validate configuration
+                </li>
+                <li class="@GetStepCss(CreateVmStage.Cloning)">
+                    Clone VM in Proxmox
+                </li>
+                <li class="@GetStepCss(CreateVmStage.ConfiguringResources)">
+                    Configure CPU and memory
+                </li>
+                <li class="@GetStepCss(CreateVmStage.ResizingDisk)">
+                    Resize disk (if needed)
+                </li>
+                <li class="@GetStepCss(CreateVmStage.SavingToDatabase)">
+                    Save VM in portal database
+                </li>
+            </ol>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_stageMessage))
+        {
+            <div class="alert @( _stage == CreateVmStage.Failed ? "alert-danger" : "alert-info" )">
+                @_stageMessage
+            </div>
+        }
+    }
+
     @if (!string.IsNullOrEmpty(_formError))
     {
         <div class="alert alert-warning">
@@ -53,7 +86,9 @@ else
         <fieldset disabled="@_saving">
             <div class="mb-3">
                 <label class="form-label">Template</label>
-                <InputSelect class="form-select" @bind-Value="_model.TemplateId">
+                <InputSelect class="form-select"
+                             @bind-Value="_model.TemplateId"
+                             @onchange="OnTemplateChanged">
                     <option value="">-- Select Template --</option>
                     @foreach (VmTemplate template in _templates)
                     {
@@ -83,14 +118,65 @@ else
                 <div class="col-4">
                     <label class="form-label">CPU Cores</label>
                     <InputNumber class="form-control" @bind-Value="_model.CpuCores" />
+                    @{
+                        string? cpuError = GetCpuError();
+                        if (!string.IsNullOrEmpty(cpuError))
+                        {
+                            <div class="text-danger">@cpuError</div>
+                        }
+                        else
+                        {
+                            VmTemplate? t = GetCurrentTemplate();
+                            if (t != null)
+                            {
+                                <div class="form-text">
+                                    Template default: @t.DefaultCpuCores, Max: @_vmLimits.MaxCpuCores
+                                </div>
+                            }
+                        }
+                    }
                 </div>
                 <div class="col-4">
                     <label class="form-label">RAM (MiB)</label>
                     <InputNumber class="form-control" @bind-Value="_model.MemoryMiB" />
+                    @{
+                        string? memError = GetMemoryError();
+                        if (!string.IsNullOrEmpty(memError))
+                        {
+                            <div class="text-danger">@memError</div>
+                        }
+                        else
+                        {
+                            VmTemplate? t = GetCurrentTemplate();
+                            if (t != null)
+                            {
+                                <div class="form-text">
+                                    Template default: @t.DefaultMemoryMiB MiB, Max: @_vmLimits.MaxMemoryMiB MiB
+                                </div>
+                            }
+                        }
+                    }
                 </div>
                 <div class="col-4">
                     <label class="form-label">Disk (GiB)</label>
                     <InputNumber class="form-control" @bind-Value="_model.DiskGiB" />
+                    @{
+                        string? diskError = GetDiskError();
+                        if (!string.IsNullOrEmpty(diskError))
+                        {
+                            <div class="text-danger">@diskError</div>
+                        }
+                        else
+                        {
+                            VmTemplate? t = GetCurrentTemplate();
+                            if (t != null)
+                            {
+                                <div class="form-text">
+                                    Template default: @t.DefaultDiskGiB GiB, Max: @_vmLimits.MaxDiskGiB GiB
+                                </div>
+                            }
+                        }
+                    }
                 </div>
             </div>
 
@@ -109,6 +195,18 @@ else
 }
 
 @code {
+    private enum CreateVmStage
+    {
+        None = 0,
+        Validating = 1,
+        Cloning = 2,
+        ConfiguringResources = 3,
+        ResizingDisk = 4,
+        SavingToDatabase = 5,
+        Completed = 6,
+        Failed = 7
+    }
+
     private List<VmTemplate> _templates = new List<VmTemplate>();
     private CreateVmModel _model = new CreateVmModel();
     private bool _loading = true;
@@ -116,6 +214,8 @@ else
     private Guid _currentUserDbId;
     private string? _formError;
     private VmResourceLimitsOptions _vmLimits = new VmResourceLimitsOptions();
+    private CreateVmStage _stage = CreateVmStage.None;
+    private string? _stageMessage;
 
     private sealed class CreateVmModel
     {
@@ -129,7 +229,9 @@ else
     protected override async Task OnInitializedAsync()
     {
         await base.OnInitializedAsync();
+
         _vmLimits = VmLimitsOptions.Value;
+
         await LoadDataAsync();
     }
 
@@ -167,6 +269,49 @@ else
         }
     }
 
+    private VmTemplate? GetCurrentTemplate()
+    {
+        if (_model.TemplateId == null)
+        {
+            return null;
+        }
+
+        Guid id = _model.TemplateId.Value;
+        VmTemplate? template = _templates.FirstOrDefault(t => t.Id == id);
+        return template;
+    }
+
+    private async Task OnTemplateChanged(ChangeEventArgs args)
+    {
+        if (args.Value == null)
+        {
+            return;
+        }
+
+        string value = args.Value.ToString() ?? string.Empty;
+
+        if (!Guid.TryParse(value, out Guid templateId))
+        {
+            return;
+        }
+
+        _model.TemplateId = templateId;
+
+        VmTemplate? template = _templates.FirstOrDefault(t => t.Id == templateId);
+        if (template != null)
+        {
+            _model.CpuCores = template.DefaultCpuCores;
+            _model.MemoryMiB = template.DefaultMemoryMiB;
+            _model.DiskGiB = template.DefaultDiskGiB;
+        }
+
+        _formError = null;
+        _stage = CreateVmStage.None;
+        _stageMessage = null;
+
+        await InvokeAsync(StateHasChanged);
+    }
+
     private string? GetNameError()
     {
         return ValidateDnsName(_model.Name);
@@ -201,6 +346,129 @@ else
         return null;
     }
 
+    private string? ValidateCpu(int cpuCores, VmTemplate template)
+    {
+        if (cpuCores <= 0)
+        {
+            return "CPU cores must be positive.";
+        }
+
+        if (cpuCores < template.DefaultCpuCores)
+        {
+            return $"CPU cores cannot be smaller than the template default ({template.DefaultCpuCores}).";
+        }
+
+        if (_vmLimits.MaxCpuCores > 0 && cpuCores > _vmLimits.MaxCpuCores)
+        {
+            return $"CPU cores cannot exceed the configured maximum ({_vmLimits.MaxCpuCores}).";
+        }
+
+        return null;
+    }
+
+    private string? ValidateMemory(int memoryMiB, VmTemplate template)
+    {
+        if (memoryMiB <= 0)
+        {
+            return "Memory must be positive.";
+        }
+
+        if (memoryMiB < template.DefaultMemoryMiB)
+        {
+            return $"Memory cannot be smaller than the template default ({template.DefaultMemoryMiB} MiB).";
+        }
+
+        if (_vmLimits.MaxMemoryMiB > 0 && memoryMiB > _vmLimits.MaxMemoryMiB)
+        {
+            return $"Memory cannot exceed the configured maximum ({_vmLimits.MaxMemoryMiB} MiB).";
+        }
+
+        return null;
+    }
+
+    private string? ValidateDisk(int diskGiB, VmTemplate template)
+    {
+        if (diskGiB <= 0)
+        {
+            return "Disk size must be positive.";
+        }
+
+        if (diskGiB < template.DefaultDiskGiB)
+        {
+            return $"Disk size cannot be smaller than the template default ({template.DefaultDiskGiB} GiB).";
+        }
+
+        if (_vmLimits.MaxDiskGiB > 0 && diskGiB > _vmLimits.MaxDiskGiB)
+        {
+            return $"Disk size cannot exceed the configured maximum ({_vmLimits.MaxDiskGiB} GiB).";
+        }
+
+        return null;
+    }
+
+    private string? GetCpuError()
+    {
+        VmTemplate? template = GetCurrentTemplate();
+        if (template == null)
+        {
+            return null;
+        }
+
+        return ValidateCpu(_model.CpuCores, template);
+    }
+
+    private string? GetMemoryError()
+    {
+        VmTemplate? template = GetCurrentTemplate();
+        if (template == null)
+        {
+            return null;
+        }
+
+        return ValidateMemory(_model.MemoryMiB, template);
+    }
+
+    private string? GetDiskError()
+    {
+        VmTemplate? template = GetCurrentTemplate();
+        if (template == null)
+        {
+            return null;
+        }
+
+        return ValidateDisk(_model.DiskGiB, template);
+    }
+
+    private string GetStepCss(CreateVmStage step)
+    {
+        if (_stage == CreateVmStage.Failed)
+        {
+            if (step <= _stage)
+            {
+                return "fw-bold text-danger";
+            }
+
+            return "text-muted";
+        }
+
+        if (_stage >= CreateVmStage.Completed)
+        {
+            return "text-success";
+        }
+
+        if (step < _stage)
+        {
+            return "text-success";
+        }
+
+        if (step == _stage)
+        {
+            return "fw-bold text-primary";
+        }
+
+        return "text-muted";
+    }
+
     private async Task CreateVmAsync()
     {
         if (_saving)
@@ -210,6 +478,9 @@ else
 
         _saving = true;
         _formError = null;
+        _stage = CreateVmStage.Validating;
+        _stageMessage = "Validating VM configuration...";
+        StateHasChanged();
 
         try
         {
@@ -217,15 +488,19 @@ else
             {
                 _formError = "Please select a template.";
                 await LogSecurityEventAsync("VmCreateValidationFailed", "TemplateId is null", "Warning");
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Validation failed: no template selected.";
                 _saving = false;
                 return;
             }
 
-            VmTemplate? template = await Db.VmTemplates.FirstOrDefaultAsync(t => t.Id == _model.TemplateId.Value);
+            VmTemplate? template = GetCurrentTemplate();
             if (template == null || !template.IsActive)
             {
                 _formError = "Selected template is not available.";
                 await LogSecurityEventAsync("VmCreateValidationFailed", "Template not found or inactive", "Warning");
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Validation failed: template not available.";
                 _saving = false;
                 return;
             }
@@ -237,41 +512,48 @@ else
             {
                 _formError = dnsError;
                 await LogSecurityEventAsync("VmCreateValidationFailed", $"Invalid VM name: {dnsError}", "Warning");
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Validation failed: VM name is not DNS-compatible.";
                 _saving = false;
                 return;
             }
 
-            if (_model.CpuCores <= 0 || _model.MemoryMiB <= 0 || _model.DiskGiB <= 0)
+            string? cpuError = ValidateCpu(_model.CpuCores, template);
+            if (!string.IsNullOrEmpty(cpuError))
             {
-                _formError = "CPU, RAM and Disk must be positive values.";
-                await LogSecurityEventAsync("VmCreateValidationFailed", "Invalid resource values", "Warning");
+                _formError = cpuError;
+                await LogSecurityEventAsync("VmCreateValidationFailed", cpuError, "Warning");
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Validation failed: CPU configuration invalid.";
                 _saving = false;
                 return;
             }
 
-            // Disk size must not be smaller than template default
-            if (_model.DiskGiB < template.DefaultDiskGiB)
+            string? memError = ValidateMemory(_model.MemoryMiB, template);
+            if (!string.IsNullOrEmpty(memError))
             {
-                _formError = $"Disk size cannot be smaller than the template default ({template.DefaultDiskGiB} GiB).";
-                await LogSecurityEventAsync(
-                    "VmCreateValidationFailed",
-                    $"Requested disk {_model.DiskGiB} GiB smaller than template default {template.DefaultDiskGiB} GiB",
-                    "Warning");
+                _formError = memError;
+                await LogSecurityEventAsync("VmCreateValidationFailed", memError, "Warning");
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Validation failed: memory configuration invalid.";
                 _saving = false;
                 return;
             }
 
-            // Disk size must not exceed configured maximum
-            if (_vmLimits.MaxDiskGiB > 0 && _model.DiskGiB > _vmLimits.MaxDiskGiB)
+            string? diskError = ValidateDisk(_model.DiskGiB, template);
+            if (!string.IsNullOrEmpty(diskError))
             {
-                _formError = $"Disk size cannot exceed the configured maximum ({_vmLimits.MaxDiskGiB} GiB).";
-                await LogSecurityEventAsync(
-                    "VmCreateValidationFailed",
-                    $"Requested disk {_model.DiskGiB} GiB exceeds max {_vmLimits.MaxDiskGiB} GiB",
-                    "Warning");
+                _formError = diskError;
+                await LogSecurityEventAsync("VmCreateValidationFailed", diskError, "Warning");
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Validation failed: disk configuration invalid.";
                 _saving = false;
                 return;
             }
+
+            _stage = CreateVmStage.Cloning;
+            _stageMessage = "Cloning VM in Proxmox...";
+            StateHasChanged();
 
             // Step 1: clone
             ProxmoxCloneResult cloneResult;
@@ -293,6 +575,8 @@ else
                     $"Template: {template.Name} ({template.TemplateVmId}), Error: {ex.Message}",
                     "Error");
                 _formError = "Failed to start VM creation in Proxmox. Please try again or contact an administrator.";
+                _stage = CreateVmStage.Failed;
+                _stageMessage = "Proxmox clone failed.";
                 _saving = false;
                 return;
             }
@@ -303,36 +587,37 @@ else
                 $"Template: {template.Name} ({template.TemplateVmId}), New VM: {name}, TaskId: {cloneResult.TaskId}, VmId: {newVmId}",
                 "Information");
 
+            _stage = CreateVmStage.ConfiguringResources;
+            _stageMessage = "Configuring CPU and memory...";
+            StateHasChanged();
+
             // Step 2: configure CPU/RAM
             try
             {
-                int requestedDiskGiB = _model.DiskGiB;
-                int templateDiskGiB = template.DefaultDiskGiB;
+                await Proxmox.ConfigureVmResourcesAsync(
+                    template.Node,
+                    newVmId,
+                    _model.CpuCores,
+                    _model.MemoryMiB,
+                    default);
 
-                if (requestedDiskGiB > templateDiskGiB)
-                {
-                    await Proxmox.ResizeVmDiskAsync(
-                        template.Node,
-                        newVmId,
-                        requestedDiskGiB,   // absolute new size
-                        default);
-
-                    await LogSecurityEventAsync(
-                        "VmDiskResized",
-                        $"VM: {name} ({newVmId}), Disk: {requestedDiskGiB} GiB (from template {templateDiskGiB} GiB)",
-                        "Information");
-                }
+                await LogSecurityEventAsync("VmConfigUpdated",
+                    $"VM: {name} ({newVmId}), CPU: {_model.CpuCores}, RAM: {_model.MemoryMiB} MiB",
+                    "Information");
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Proxmox disk resize failed for VM {VmId} on node {Node}", newVmId, template.Node);
-                await LogSecurityEventAsync(
-                    "VmDiskResizeFailed",
-                    $"VM: {name} ({newVmId}), Requested Disk: {_model.DiskGiB} GiB, Error: {ex.Message}",
+                Logger.LogError(ex, "Proxmox config failed for VM {VmId} on node {Node}", newVmId, template.Node);
+                await LogSecurityEventAsync("VmConfigFailed",
+                    $"VM: {name} ({newVmId}), Error: {ex.Message}",
                     "Warning");
-                // Continue; VM exists with template disk size.
             }
 
+            _stage = CreateVmStage.ResizingDisk;
+            _stageMessage = "Resizing disk (if needed)...";
+            StateHasChanged();
+
+            // Step 2b: resize disk if requested larger than template default
             try
             {
                 int requestedDiskGiB = _model.DiskGiB;
@@ -359,9 +644,11 @@ else
                     "VmDiskResizeFailed",
                     $"VM: {name} ({newVmId}), Requested Disk: {_model.DiskGiB} GiB, Error: {ex.Message}",
                     "Warning");
-                // Continue; VM exists with template disk size.
             }
 
+            _stage = CreateVmStage.SavingToDatabase;
+            _stageMessage = "Saving VM in portal database...";
+            StateHasChanged();
 
             // Step 3: insert DB record with real VmId
             Vm vm = new Vm
@@ -385,6 +672,11 @@ else
                 $"Template: {template.Name} ({template.TemplateVmId}), VM: {name}, VmId: {newVmId}, CloneTaskId: {cloneResult.TaskId}",
                 "Information");
 
+            _stage = CreateVmStage.Completed;
+            _stageMessage = "VM created successfully. Redirecting to My VMs...";
+            StateHasChanged();
+
+            await Task.Delay(1500);
             Nav.NavigateTo("/my-vms");
         }
         catch (Exception ex)
@@ -392,6 +684,8 @@ else
             Logger.LogError(ex, "Failed to create VM from template for user {UserId}", CurrentUserId);
             await LogSecurityEventAsync("VmCreateFromTemplateFailed", ex.Message, "Error");
             _formError = "An unexpected error occurred while creating the VM.";
+            _stage = CreateVmStage.Failed;
+            _stageMessage = "VM creation failed due to an unexpected error.";
             _saving = false;
         }
     }
