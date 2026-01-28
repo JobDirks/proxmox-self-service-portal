@@ -6,5 +6,7 @@ namespace VmPortal.Infrastructure.Proxmox
         public string TokenId { get; set; } = string.Empty;     // e.g. root@pam!TokenID
         public string TokenSecret { get; set; } = string.Empty; // secret
         public bool DevIgnoreCertErrors { get; set; } = true;   // DEV ONLY; disable in production
+
+        public string DefaultDisk { get; set; } = "scsi0";
     }
 }

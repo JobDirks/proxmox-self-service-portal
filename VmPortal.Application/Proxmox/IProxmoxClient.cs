@@ -21,5 +21,18 @@ namespace VmPortal.Application.Proxmox
             CancellationToken ct = default);
 
         Task<int> GetNextVmIdAsync(CancellationToken ct = default);
+
+        Task ConfigureVmResourcesAsync(
+            string node,
+            int vmId,
+            int cpuCores,
+            int memoryMiB,
+            CancellationToken ct = default);
+
+        Task ResizeVmDiskAsync(
+            string node,
+            int vmId,
+            int newDiskGiB,
+            CancellationToken ct = default);
     }
 }

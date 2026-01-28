@@ -151,5 +151,151 @@ namespace VmPortal.Infrastructure.Proxmox
 
             return result;
         }
+
+        public async Task ConfigureVmResourcesAsync(
+            string node,
+            int vmId,
+            int cpuCores,
+            int memoryMiB,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            if (vmId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(vmId), "VMID must be positive.");
+            }
+
+            // Build form only with values we actually want to change
+            Dictionary<string, string> form = new Dictionary<string, string>();
+
+            if (cpuCores > 0)
+            {
+                form["cores"] = cpuCores.ToString();
+            }
+
+            if (memoryMiB > 0)
+            {
+                form["memory"] = memoryMiB.ToString();
+            }
+
+            // If nothing to change, do nothing
+            if (form.Count == 0)
+            {
+                return;
+            }
+
+            HttpContent content = new FormUrlEncodedContent(form);
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/config";
+
+            using HttpResponseMessage resp = await _http.PostAsync(url, content, ct);
+            string responseBody = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Proxmox config failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {responseBody}");
+            }
+        }
+
+
+        private async Task<string?> GetPrimaryDiskNameAsync(string node, int vmId, CancellationToken ct)
+        {
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/config";
+            using HttpResponseMessage resp = await _http.GetAsync(url, ct);
+            resp.EnsureSuccessStatusCode();
+
+            JsonDocument? doc = await resp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct);
+            if (doc == null)
+            {
+                return null;
+            }
+
+            JsonElement data = doc.RootElement.GetProperty("data");
+
+            // Common disk keys in order of preference
+            string[] candidates = new[] { "scsi0", "virtio0", "sata0", "ide0", "efidisk0" };
+
+            foreach (string key in candidates)
+            {
+                if (data.TryGetProperty(key, out JsonElement _))
+                {
+                    return key;
+                }
+            }
+
+            return null;
+        }
+
+
+        public async Task ResizeVmDiskAsync(
+            string node,
+            int vmId,
+            int newDiskGiB,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            if (vmId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(vmId), "VMID must be positive.");
+            }
+
+            if (newDiskGiB <= 0)
+            {
+                return;
+            }
+
+            // Determine which disk to resize
+            string? diskName;
+
+            if (!string.IsNullOrWhiteSpace(_opt.DefaultDisk))
+            {
+                diskName = _opt.DefaultDisk;
+            }
+            else
+            {
+                diskName = await GetPrimaryDiskNameAsync(node, vmId, ct);
+            }
+
+            if (string.IsNullOrWhiteSpace(diskName))
+            {
+                throw new InvalidOperationException(
+                    $"Could not determine primary disk for VM {vmId} on node {node}.");
+            }
+
+            // Absolute new size, e.g. "60G"
+            string sizeArgument = newDiskGiB.ToString() + "G";
+
+            Dictionary<string, string> form = new Dictionary<string, string>
+            {
+                ["disk"] = diskName,
+                ["size"] = sizeArgument
+            };
+
+            HttpContent content = new FormUrlEncodedContent(form);
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/resize";
+
+            // IMPORTANT: use PUT, not POST
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Put, url)
+            {
+                Content = content
+            };
+
+            using HttpResponseMessage resp = await _http.SendAsync(request, ct);
+            string responseBody = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Proxmox disk resize failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {responseBody}");
+            }
+        }
     }
 }

@@ -13,6 +13,7 @@ using VmPortal.Web.Extensions;
 using VmPortal.Web.Middleware;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
+using VmPortal.Application.Vms;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +37,10 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 // HTTP Context Accessor for authorization handlers
 builder.Services.AddHttpContextAccessor();
+
+// VM Resource Limits configuration
+builder.Services.Configure<VmResourceLimitsOptions>(
+    builder.Configuration.GetSection("VmResourceLimits"));
 
 // Authentication + Authorization (Entra ID with enhanced security)
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
