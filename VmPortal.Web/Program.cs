@@ -2,18 +2,22 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Identity.Web;
-using VmPortal.Web.Components;
-using VmPortal.Infrastructure;
-using VmPortal.Infrastructure.Data;
+using System.Security.Claims;
+using VmPortal.Application.Console;
 using VmPortal.Application.Security;
 using VmPortal.Application.Security.Requirements;
+using VmPortal.Application.Vms;
 using VmPortal.Domain.Security;
+using VmPortal.Domain.Users;
+using VmPortal.Domain.Vms;
+using VmPortal.Infrastructure;
+using VmPortal.Infrastructure.Data;
+using VmPortal.Web.Components;
 using VmPortal.Web.Extensions;
 using VmPortal.Web.Middleware;
-using System.Security.Claims;
-using Microsoft.Extensions.Logging;
-using VmPortal.Application.Vms;
+
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -186,7 +190,10 @@ app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseAntiforgery();
+//app.UseAntiforgery();
+app.UseWhen(
+    ctx => !ctx.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseAntiforgery());
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
@@ -223,6 +230,76 @@ app.MapGet("/logout", async ctx =>
         new AuthenticationProperties { RedirectUri = "/" });
 }).RequireAuthorization();
 
+
+app.MapPost("/api/console-session",
+    async (Guid vmId,
+           HttpContext httpContext,
+           VmPortalDbContext db,
+           IConsoleSessionService consoleSessionService,
+           CancellationToken ct) =>
+    {
+        ClaimsPrincipal user = httpContext.User;
+
+        if (!user.Identity?.IsAuthenticated ?? true)
+        {
+            return Results.Json(new { error = "unauthorized" }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        bool isAdmin = user.IsInRole("Admin");
+
+        string? externalId = user.GetObjectId();
+
+        if (string.IsNullOrEmpty(externalId))
+        {
+            return Results.Json(new { error = "no_external_id" }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        User? currentUser = await db.Users.FirstOrDefaultAsync(u => u.ExternalId == externalId, ct);
+        if (currentUser == null)
+        {
+            return Results.Json(new { error = "user_not_in_db", externalId }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        Vm? vm = await db.Vms.FirstOrDefaultAsync(v => v.Id == vmId, ct);
+        if (vm == null)
+        {
+            return Results.Json(new { error = "vm_not_found" }, statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (!isAdmin && vm.OwnerUserId != currentUser.Id)
+        {
+            return Results.Json(new { error = "forbidden_not_owner" }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (vm.VmId <= 0 || string.IsNullOrWhiteSpace(vm.Node))
+        {
+            return Results.Json(new { error = "vm_not_linked_to_proxmox" }, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        string nodeName = vm.Node.Trim();
+
+        string sessionId;
+        try
+        {
+            sessionId = await consoleSessionService.CreateSessionAsync(nodeName, vm.VmId, externalId, ct);
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(
+                new { error = "proxmox_error", details = ex.Message },
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        return Results.Ok(new { sessionId });
+    })
+    .RequireAuthorization();
+
+
 app.MapHealthChecks("/health");
 
 app.Run();
+
+public sealed class ConsoleSessionRequest
+{
+    public Guid VmId { get; set; }
+}

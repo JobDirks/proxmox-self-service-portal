@@ -39,5 +39,10 @@ namespace VmPortal.Application.Proxmox
         Task ResetVmAsync(string node, int vmId, CancellationToken ct = default);
         Task PauseVmAsync(string node, int vmId, CancellationToken ct = default);
         Task ResumeVmAsync(string node, int vmId, CancellationToken ct = default);
+
+        Task<ProxmoxVncProxyInfo> CreateVncProxyAsync(
+            string node,
+            int vmId,
+            CancellationToken ct = default);
     }
 }

@@ -16,6 +16,8 @@ using VmPortal.Infrastructure.Data;
 using VmPortal.Infrastructure.Proxmox;
 using VmPortal.Infrastructure.Security;
 using VmPortal.Infrastructure.Security.Handlers;
+using VmPortal.Application.Console;
+using VmPortal.Infrastructure.Console;
 
 namespace VmPortal.Infrastructure
 {
@@ -47,6 +49,11 @@ namespace VmPortal.Infrastructure
 
             // Authorization handlers
             services.AddScoped<IAuthorizationHandler, SecureSessionAuthorizationHandler>();
+
+            // Console session service
+            services.AddMemoryCache();
+
+            services.AddScoped<IConsoleSessionService, ConsoleSessionService>();
 
             // Proxmox client configuration
             services.Configure<ProxmoxOptions>(configuration.GetSection("Proxmox"));

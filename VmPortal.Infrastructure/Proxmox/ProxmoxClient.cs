@@ -345,5 +345,58 @@ namespace VmPortal.Infrastructure.Proxmox
                     $"Proxmox disk resize failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {responseBody}");
             }
         }
+
+        public async Task<ProxmoxVncProxyInfo> CreateVncProxyAsync(
+            string node,
+            int vmId,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            if (vmId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(vmId), "VMID must be positive.");
+            }
+
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/vncproxy";
+            // Proxmox expects a POST; an empty form body is fine
+            HttpContent content = new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>());
+
+            using HttpResponseMessage resp = await _http.PostAsync(url, content, ct);
+            string responseBody = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Proxmox VNC proxy failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {responseBody}");
+            }
+
+            JsonDocument doc = JsonDocument.Parse(responseBody);
+            JsonElement data = doc.RootElement.GetProperty("data");
+
+            string? portString = data.GetProperty("port").GetString();
+            string? ticket = data.GetProperty("ticket").GetString();
+
+            if (string.IsNullOrEmpty(portString) || string.IsNullOrEmpty(ticket))
+            {
+                throw new InvalidOperationException("Proxmox VNC proxy response is missing port or ticket.");
+            }
+
+            if (!int.TryParse(portString, out int port))
+            {
+                throw new InvalidOperationException($"Invalid VNC port returned from Proxmox: '{portString}'.");
+            }
+
+            ProxmoxVncProxyInfo info = new ProxmoxVncProxyInfo
+            {
+                Port = port,
+                Ticket = ticket
+            };
+
+            return info;
+        }
     }
 }
