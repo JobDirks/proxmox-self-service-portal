@@ -1,0 +1,607 @@
+@page "/vm/{id:guid}"
+@rendermode InteractiveServer
+@using System
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inherits SecureComponentBase
+@using Microsoft.EntityFrameworkCore
+@using VmPortal.Infrastructure.Data
+@using VmPortal.Domain.Vms
+@using VmPortal.Domain.Users
+@using VmPortal.Application.Security
+@using VmPortal.Application.Proxmox
+@using VmPortal.Application.Vms
+@inject VmPortalDbContext Db
+@inject IProxmoxClient Proxmox
+@inject IInputSanitizer Sanitizer
+@inject NavigationManager Nav
+@inject Microsoft.Extensions.Options.IOptions<VmResourceLimitsOptions> VmLimitsOptions
+
+<PageTitle>VM Details</PageTitle>
+
+@if (_loading)
+{
+    <div class="d-flex justify-content-center py-4">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_vm == null)
+{
+    <div class="alert alert-danger">
+        VM not found or not accessible.
+    </div>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-1">@Sanitizer.SanitizeForDisplay(_vm.Name)</h1>
+            <div class="text-muted">
+                Node: @Sanitizer.SanitizeForDisplay(_vm.Node),
+                VMID: @_vm.VmId
+            </div>
+        </div>
+        <div>
+            <span class="badge @GetStatusBadgeClass(_vm.Status)">
+                @_vm.Status
+            </span>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">
+            @_message
+        </div>
+    }
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Actions
+        </div>
+        <div class="card-body">
+            <div class="btn-toolbar" role="toolbar">
+                <div class="btn-group me-2" role="group">
+                    <button class="btn btn-success btn-sm"
+                            disabled="@(!_canStart || _busy || _vm.VmId <= 0)"
+                            @onclick="StartVm">
+                        <i class="fas fa-play me-1"></i> Start
+                    </button>
+                    <button class="btn btn-warning btn-sm"
+                            disabled="@(!_canShutdown || _busy || _vm.VmId <= 0)"
+                            @onclick="ShutdownVm">
+                        <i class="fas fa-power-off me-1"></i> Shutdown
+                    </button>
+                    <button class="btn btn-danger btn-sm"
+                            disabled="@(!_canHardStop || _busy || _vm.VmId <= 0)"
+                            @onclick="HardStopVm">
+                        <i class="fas fa-stop me-1"></i> Hard Stop
+                    </button>
+                </div>
+                <div class="btn-group me-2" role="group">
+                    <button class="btn btn-primary btn-sm"
+                            disabled="@(!_canRestart || _busy || _vm.VmId <= 0)"
+                            @onclick="RestartVm">
+                        <i class="fas fa-redo me-1"></i> Restart
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm"
+                            disabled="@(!_canReset || _busy || _vm.VmId <= 0)"
+                            @onclick="ResetVm">
+                        <i class="fas fa-bolt me-1"></i> Hard Reset
+                    </button>
+                </div>
+                <div class="btn-group me-2" role="group">
+                    <button class="btn btn-outline-secondary btn-sm"
+                            disabled="@(!_canPause || _busy || _vm.VmId <= 0)"
+                            @onclick="PauseVm">
+                        <i class="fas fa-pause me-1"></i> Pause
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm"
+                            disabled="@(!_canResume || _busy || _vm.VmId <= 0)"
+                            @onclick="ResumeVm">
+                        <i class="fas fa-play-circle me-1"></i> Resume
+                    </button>
+                </div>
+                <div class="btn-group" role="group">
+                    <button class="btn btn-outline-info btn-sm"
+                            disabled="@_busy"
+                            @onclick="RefreshStatus">
+                        <i class="fas fa-sync-alt me-1"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Resources
+        </div>
+        <div class="card-body">
+            <dl class="row">
+                <dt class="col-sm-3">CPU Cores</dt>
+                <dd class="col-sm-9">@_vm.CpuCores</dd>
+
+                <dt class="col-sm-3">Memory (MiB)</dt>
+                <dd class="col-sm-9">@_vm.MemoryMiB</dd>
+
+                <dt class="col-sm-3">Disk (GiB)</dt>
+                <dd class="col-sm-9">@_vm.DiskGiB</dd>
+
+                <dt class="col-sm-3">Last Synced</dt>
+                <dd class="col-sm-9">@_vm.LastSyncedAt.ToString("u")</dd>
+            </dl>
+
+            <hr />
+
+            <h5 class="mt-3">Adjust Resources</h5>
+            <p class="text-muted mb-3">
+                You can increase CPU, memory and disk size within the configured limits.
+                Decreasing resources is not allowed.
+            </p>
+
+            <EditForm Model="_resourceModel"
+                      OnValidSubmit="UpdateResourcesAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <fieldset disabled="@_busy">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">CPU Cores</label>
+                            <InputNumber class="form-control" @bind-Value="_resourceModel.CpuCores" />
+                            @{
+                                string? cpuError = GetCpuError();
+                                if (!string.IsNullOrEmpty(cpuError))
+                                {
+                                    <div class="text-danger">@cpuError</div>
+                                }
+                                else
+                                {
+                                    <div class="form-text">
+                                        Min: @_vm.CpuCores, Max: @_limits.MaxCpuCores
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Memory (MiB)</label>
+                            <InputNumber class="form-control" @bind-Value="_resourceModel.MemoryMiB" />
+                            @{
+                                string? memError = GetMemoryError();
+                                if (!string.IsNullOrEmpty(memError))
+                                {
+                                    <div class="text-danger">@memError</div>
+                                }
+                                else
+                                {
+                                    <div class="form-text">
+                                        Min: @_vm.MemoryMiB, Max: @_limits.MaxMemoryMiB
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Disk (GiB)</label>
+                            <InputNumber class="form-control" @bind-Value="_resourceModel.DiskGiB" />
+                            @{
+                                string? diskError = GetDiskError();
+                                if (!string.IsNullOrEmpty(diskError))
+                                {
+                                    <div class="text-danger">@diskError</div>
+                                }
+                                else
+                                {
+                                    <div class="form-text">
+                                        Min: @_vm.DiskGiB, Max: @_limits.MaxDiskGiB
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary"
+                            disabled="@(_busy || _vm.VmId <= 0)">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Apply Resource Changes
+                    </button>
+                </fieldset>
+            </EditForm>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+        <button class="btn btn-secondary" @onclick="BackToList">
+            Back to My VMs
+        </button>
+        <!-- Console integration to be implemented later -->
+        <button class="btn btn-outline-dark" disabled>
+            Console (NoVNC) - planned
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Vm? _vm;
+    private bool _loading = true;
+    private bool _busy = false;
+    private string? _message;
+    private bool _isError;
+
+    private bool _canStart;
+    private bool _canShutdown;
+    private bool _canHardStop;
+    private bool _canRestart;
+    private bool _canReset;
+    private bool _canPause;
+    private bool _canResume;
+
+    private VmResourceLimitsOptions _limits = new VmResourceLimitsOptions();
+
+    private ResourceUpdateModel _resourceModel = new ResourceUpdateModel();
+
+    private sealed class ResourceUpdateModel
+    {
+        public int CpuCores { get; set; }
+        public int MemoryMiB { get; set; }
+        public int DiskGiB { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        _limits = VmLimitsOptions.Value;
+        await LoadVmAsync();
+    }
+
+    private async Task LoadVmAsync()
+    {
+        try
+        {
+            _vm = await Db.Vms.FirstOrDefaultAsync(v => v.Id == Id);
+            if (_vm != null)
+            {
+                UpdateActionAvailability();
+                _resourceModel = new ResourceUpdateModel
+                {
+                    CpuCores = _vm.CpuCores,
+                    MemoryMiB = _vm.MemoryMiB,
+                    DiskGiB = _vm.DiskGiB
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load VM {VmId}", Id);
+            _vm = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void UpdateActionAvailability()
+    {
+        if (_vm == null)
+        {
+            _canStart = false;
+            _canShutdown = false;
+            _canHardStop = false;
+            _canRestart = false;
+            _canReset = false;
+            _canPause = false;
+            _canResume = false;
+            return;
+        }
+
+        VmStatus status = _vm.Status;
+
+        _canStart = status == VmStatus.Stopped;
+        _canShutdown = status == VmStatus.Running;
+        _canHardStop = status == VmStatus.Running || status == VmStatus.Paused;
+        _canRestart = status == VmStatus.Running;
+        _canReset = status == VmStatus.Running || status == VmStatus.Paused;
+        _canPause = status == VmStatus.Running;
+        _canResume = status == VmStatus.Paused;
+    }
+
+    private static string GetStatusBadgeClass(VmStatus status)
+    {
+        return status switch
+        {
+            VmStatus.Running => "bg-success",
+            VmStatus.Stopped => "bg-secondary",
+            VmStatus.Paused => "bg-warning",
+            _ => "bg-dark"
+        };
+    }
+
+    private async Task RefreshStatus()
+    {
+        if (_vm == null || _busy || _vm.VmId <= 0)
+        {
+            return;
+        }
+
+        _busy = true;
+        ClearMessage();
+        StateHasChanged();
+
+        try
+        {
+            VmStatus status = await Proxmox.GetVmStatusAsync(_vm.Node, _vm.VmId);
+            _vm.Status = status;
+            _vm.LastSyncedAt = DateTimeOffset.UtcNow;
+            await Db.SaveChangesAsync();
+
+            UpdateActionAvailability();
+            ShowMessage($"Status refreshed: {status}", false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to refresh status for VM {Vm}", _vm.Id);
+            ShowMessage("Failed to refresh VM status.", true);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartVm() => await ExecuteVmAction("StartVm", Proxmox.StartVmAsync, "Start requested.");
+    private async Task ShutdownVm() => await ExecuteVmAction("ShutdownVm", Proxmox.ShutdownVmAsync, "Shutdown requested.");
+    private async Task HardStopVm() => await ExecuteVmAction("HardStopVm", Proxmox.StopVmAsync, "Hard stop requested.");
+    private async Task RestartVm() => await ExecuteVmAction("RebootVm", Proxmox.RebootVmAsync, "Restart requested.");
+    private async Task ResetVm() => await ExecuteVmAction("ResetVm", Proxmox.ResetVmAsync, "Hard reset requested.");
+    private async Task PauseVm() => await ExecuteVmAction("PauseVm", Proxmox.PauseVmAsync, "Pause requested.");
+    private async Task ResumeVm() => await ExecuteVmAction("ResumeVm", Proxmox.ResumeVmAsync, "Resume requested.");
+
+    private async Task ExecuteVmAction(
+        string actionName,
+        Func<string, int, System.Threading.CancellationToken, Task> proxmoxAction,
+        string successMessage)
+    {
+        if (_vm == null || _busy || _vm.VmId <= 0)
+        {
+            return;
+        }
+
+        _busy = true;
+        ClearMessage();
+        StateHasChanged();
+
+        try
+        {
+            string nodeName = Sanitizer.SanitizeNodeName(_vm.Node);
+            if (string.IsNullOrEmpty(nodeName))
+            {
+                ShowMessage("Invalid node name.", true);
+                _busy = false;
+                return;
+            }
+
+            await proxmoxAction(nodeName, _vm.VmId, default);
+
+            await LogSecurityEventAsync(
+                "VmAction",
+                $"Action: {actionName}, VM: {Sanitizer.SanitizeForLog(_vm.Name)} ({_vm.VmId})",
+                "Information");
+
+            ShowMessage(successMessage, false);
+
+            await Task.Delay(1000);
+            await RefreshStatus();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to execute {Action} for VM {VmId}", actionName, _vm.VmId);
+            await LogSecurityEventAsync(
+                "VmActionFailed",
+                $"Action: {actionName}, VM: {(_vm != null ? Sanitizer.SanitizeForLog(_vm.Name) : "unknown")}, Error: {ex.Message}",
+                "Error");
+            ShowMessage($"Failed to execute {actionName}.", true);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private string? GetCpuError()
+    {
+        if (_vm == null)
+        {
+            return null;
+        }
+
+        int newCpu = _resourceModel.CpuCores;
+        if (newCpu <= 0)
+        {
+            return "CPU cores must be positive.";
+        }
+
+        if (newCpu < _vm.CpuCores)
+        {
+            return $"CPU cores cannot be smaller than the current value ({_vm.CpuCores}).";
+        }
+
+        if (_limits.MaxCpuCores > 0 && newCpu > _limits.MaxCpuCores)
+        {
+            return $"CPU cores cannot exceed the configured maximum ({_limits.MaxCpuCores}).";
+        }
+
+        return null;
+    }
+
+    private string? GetMemoryError()
+    {
+        if (_vm == null)
+        {
+            return null;
+        }
+
+        int newMem = _resourceModel.MemoryMiB;
+        if (newMem <= 0)
+        {
+            return "Memory must be positive.";
+        }
+
+        if (newMem < _vm.MemoryMiB)
+        {
+            return $"Memory cannot be smaller than the current value ({_vm.MemoryMiB} MiB).";
+        }
+
+        if (_limits.MaxMemoryMiB > 0 && newMem > _limits.MaxMemoryMiB)
+        {
+            return $"Memory cannot exceed the configured maximum ({_limits.MaxMemoryMiB} MiB).";
+        }
+
+        return null;
+    }
+
+    private string? GetDiskError()
+    {
+        if (_vm == null)
+        {
+            return null;
+        }
+
+        int newDisk = _resourceModel.DiskGiB;
+        if (newDisk <= 0)
+        {
+            return "Disk size must be positive.";
+        }
+
+        if (newDisk < _vm.DiskGiB)
+        {
+            return $"Disk size cannot be smaller than the current value ({_vm.DiskGiB} GiB).";
+        }
+
+        if (_limits.MaxDiskGiB > 0 && newDisk > _limits.MaxDiskGiB)
+        {
+            return $"Disk size cannot exceed the configured maximum ({_limits.MaxDiskGiB} GiB).";
+        }
+
+        return null;
+    }
+
+    private async Task UpdateResourcesAsync()
+    {
+        if (_vm == null || _busy || _vm.VmId <= 0)
+        {
+            return;
+        }
+
+        string? cpuError = GetCpuError();
+        string? memError = GetMemoryError();
+        string? diskError = GetDiskError();
+
+        if (!string.IsNullOrEmpty(cpuError) ||
+            !string.IsNullOrEmpty(memError) ||
+            !string.IsNullOrEmpty(diskError))
+        {
+            ShowMessage("Resource validation failed. Please correct the highlighted fields.", true);
+            return;
+        }
+
+        _busy = true;
+        ClearMessage();
+        StateHasChanged();
+
+        try
+        {
+            string nodeName = Sanitizer.SanitizeNodeName(_vm.Node);
+            if (string.IsNullOrEmpty(nodeName))
+            {
+                ShowMessage("Invalid node name.", true);
+                _busy = false;
+                return;
+            }
+
+            bool cpuMemChanged = _resourceModel.CpuCores != _vm.CpuCores ||
+                                 _resourceModel.MemoryMiB != _vm.MemoryMiB;
+            bool diskChanged = _resourceModel.DiskGiB != _vm.DiskGiB;
+
+            if (cpuMemChanged)
+            {
+                await Proxmox.ConfigureVmResourcesAsync(
+                    nodeName,
+                    _vm.VmId,
+                    _resourceModel.CpuCores,
+                    _resourceModel.MemoryMiB,
+                    default);
+
+                await LogSecurityEventAsync(
+                    "VmResourcesUpdated",
+                    $"VM: {Sanitizer.SanitizeForLog(_vm.Name)} ({_vm.VmId}), CPU: {_resourceModel.CpuCores}, RAM: {_resourceModel.MemoryMiB} MiB",
+                    "Information");
+
+                _vm.CpuCores = _resourceModel.CpuCores;
+                _vm.MemoryMiB = _resourceModel.MemoryMiB;
+            }
+
+            if (diskChanged && _resourceModel.DiskGiB > _vm.DiskGiB)
+            {
+                await Proxmox.ResizeVmDiskAsync(
+                    nodeName,
+                    _vm.VmId,
+                    _resourceModel.DiskGiB,
+                    default);
+
+                await LogSecurityEventAsync(
+                    "VmDiskResized",
+                    $"VM: {Sanitizer.SanitizeForLog(_vm.Name)} ({_vm.VmId}), Disk: {_resourceModel.DiskGiB} GiB (from {_vm.DiskGiB} GiB)",
+                    "Information");
+
+                _vm.DiskGiB = _resourceModel.DiskGiB;
+            }
+
+            _vm.LastSyncedAt = DateTimeOffset.UtcNow;
+            await Db.SaveChangesAsync();
+
+            ShowMessage("Resources updated successfully.", false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update resources for VM {VmId}", _vm.VmId);
+            await LogSecurityEventAsync(
+                "VmResourceUpdateFailed",
+                $"VM: {(_vm != null ? Sanitizer.SanitizeForLog(_vm.Name) : "unknown")}, Error: {ex.Message}",
+                "Error");
+            ShowMessage("Failed to update VM resources.", true);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowMessage(string message, bool isError)
+    {
+        _message = message;
+        _isError = isError;
+    }
+
+    private void ClearMessage()
+    {
+        _message = null;
+        _isError = false;
+    }
+
+    private void BackToList()
+    {
+        Nav.NavigateTo("/my-vms");
+    }
+}

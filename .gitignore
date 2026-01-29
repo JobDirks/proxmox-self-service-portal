@@ -31,6 +31,8 @@ dist/
 /VmPortal.Web/data/*.db
 /VmPortal.Web/data/
 *.sqlite
+/VmPortal.Web/data/*
+!/VmPortal.Web/data/.gitkeep
 
 # User secrets and local env
 *.user

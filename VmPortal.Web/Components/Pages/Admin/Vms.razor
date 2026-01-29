@@ -152,33 +152,24 @@ else
                                 <td>
                                     <small>@vm.LastSyncedAt.ToString("MMM d, HH:mm")</small>
                                 </td>
-                                <td>
-                                    <div class="btn-group-vertical btn-group-sm" role="group">
-                                        <button class="btn @(vm.Status == VmStatus.Running ? "btn-outline-secondary" : "btn-outline-success") btn-sm"
-                                                @onclick="() => StartVmAsync(vm)"
-                                                disabled="@(_operationInProgress || vm.Status == VmStatus.Running || _rateLimitCooldown.HasValue)"
-                                                title="Start VM">
-                                            <i class="fas fa-play"></i>
-                                        </button>
-                                        <button class="btn @(vm.Status == VmStatus.Stopped ? "btn-outline-secondary" : "btn-outline-warning") btn-sm"
-                                                @onclick="() => StopVmAsync(vm)"
-                                                disabled="@( _operationInProgress || vm.Status == VmStatus.Stopped || _rateLimitCooldown.HasValue ? "disabled" : null)"
-                                                title="Stop VM">
-                                            <i class="fas fa-stop"></i>
-                                        </button>
-                                        <button class="btn @(vm.Status == VmStatus.Stopped ? "btn-outline-secondary" : "btn-outline-danger") btn-sm"
-                                                @onclick="() => ShutdownVmAsync(vm)"
-                                                disabled="@( _operationInProgress || vm.Status == VmStatus.Stopped || _rateLimitCooldown.HasValue ? "disabled" : null)"
-                                                title="Shutdown VM">
-                                            <i class="fas fa-power-off"></i>
-                                        </button>
-                                        <button class="btn btn-outline-info btn-sm"
-                                                @onclick="() => RefreshStatusAsync(vm)"
-                                                disabled="@( _operationInProgress && _currentVm?.Id == vm.Id ? "disabled" : null)"
-                                                title="Refresh Status">
-                                            <i class="fas fa-sync-alt"></i>
-                                        </button>
-                                    </div>
+                                <td class="text-nowrap">
+                                    <button class="btn btn-sm btn-success me-1"
+                                            disabled="@(_operationInProgress || vm.Status == VmStatus.Running || _rateLimitCooldown.HasValue || vm.VmId <= 0)"
+                                            @onclick="() => StartVmAsync(vm)">
+                                        <i class="fas fa-play me-1"></i> Start
+                                    </button>
+
+                                    <button class="btn btn-sm btn-warning me-1"
+                                            disabled="@(_operationInProgress || vm.Status != VmStatus.Running || _rateLimitCooldown.HasValue || vm.VmId <= 0)"
+                                            @onclick="() => ShutdownVmAsync(vm)">
+                                        <i class="fas fa-power-off me-1"></i> Shutdown
+                                    </button>
+
+                                    <a class="btn btn-sm btn-outline-primary"
+                                       href="@($"/vm/{vm.Id}")"
+                                       title="View details">
+                                        <i class="fas fa-info-circle me-1"></i> Details
+                                    </a>
                                 </td>
                             </tr>
                         }

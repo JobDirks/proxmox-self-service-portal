@@ -66,6 +66,54 @@ namespace VmPortal.Infrastructure.Proxmox
             resp.EnsureSuccessStatusCode();
         }
 
+        public async Task RebootVmAsync(string node, int vmId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/status/reboot";
+            using HttpResponseMessage resp = await _http.PostAsync(url, content: null, ct);
+            resp.EnsureSuccessStatusCode();
+        }
+
+        public async Task ResetVmAsync(string node, int vmId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/status/reset";
+            using HttpResponseMessage resp = await _http.PostAsync(url, content: null, ct);
+            resp.EnsureSuccessStatusCode();
+        }
+
+        public async Task PauseVmAsync(string node, int vmId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/status/suspend";
+            using HttpResponseMessage resp = await _http.PostAsync(url, content: null, ct);
+            resp.EnsureSuccessStatusCode();
+        }
+
+        public async Task ResumeVmAsync(string node, int vmId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/status/resume";
+            using HttpResponseMessage resp = await _http.PostAsync(url, content: null, ct);
+            resp.EnsureSuccessStatusCode();
+        }
+
         public async Task<int> GetNextVmIdAsync(CancellationToken ct = default)
         {
             string url = "cluster/nextid";

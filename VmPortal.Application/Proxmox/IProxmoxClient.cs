@@ -34,5 +34,10 @@ namespace VmPortal.Application.Proxmox
             int vmId,
             int newDiskGiB,
             CancellationToken ct = default);
+
+        Task RebootVmAsync(string node, int vmId, CancellationToken ct = default);
+        Task ResetVmAsync(string node, int vmId, CancellationToken ct = default);
+        Task PauseVmAsync(string node, int vmId, CancellationToken ct = default);
+        Task ResumeVmAsync(string node, int vmId, CancellationToken ct = default);
     }
 }
