@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>VM Console</title>
+
+    <!--
+      Lightweight noVNC console, tuned for embedding in an iframe.
+
+      - No pointer lock (absolute mouse + scaling only)
+      - Full-height layout without scrollbars
+      - Clear status messages for Connecting / Connected / Disconnected
+      - Uses query params: host, port, path, password, scale, view_only
+
+      This file assumes the noVNC dist structure with './core/rfb.js'.
+    -->
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100%;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background-color: #111827; /* slate-900 */
+            color: #e5e7eb; /* gray-200 */
+        }
+
+        #top_bar {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: linear-gradient(90deg, #111827, #1f2937);
+            border-bottom: 1px solid rgba(15, 23, 42, 0.8);
+        }
+
+        #status {
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+            #status span {
+                padding: 1px 6px;
+                border-radius: 999px;
+                margin-right: 6px;
+                font-weight: 600;
+            }
+
+        .status-pill-connecting {
+            background-color: rgba(59, 130, 246, 0.15); /* blue-500 */
+            color: #60a5fa;
+        }
+
+        .status-pill-ok {
+            background-color: rgba(34, 197, 94, 0.15); /* green-500 */
+            color: #4ade80;
+        }
+
+        .status-pill-error {
+            background-color: rgba(248, 113, 113, 0.15); /* red-500 */
+            color: #fca5a5;
+        }
+
+        #sendCtrlAltDelButton {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.6); /* slate-400 */
+            background-color: rgba(15, 23, 42, 0.6);
+            color: #e5e7eb;
+            cursor: pointer;
+        }
+
+            #sendCtrlAltDelButton:hover {
+                background-color: rgba(31, 41, 55, 0.9); /* slate-800 */
+            }
+
+        #screen {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+    </style>
+
+    <script type="module" crossorigin="anonymous">import RFB from './core/rfb.js';
+
+        let rfb;
+        let desktopName;
+
+        const screenElement = document.getElementById('screen');
+
+        // --- Status helpers ---
+
+        function setStatus(kind, text) {
+            const statusElem = document.getElementById('status');
+            const pillSpan = document.createElement('span');
+
+            pillSpan.className =
+                kind === 'ok' ? 'status-pill-ok' :
+                kind === 'error' ? 'status-pill-error' :
+                'status-pill-connecting';
+
+            pillSpan.textContent =
+                kind === 'ok' ? 'Connected' :
+                kind === 'error' ? 'Error' :
+                'Connecting';
+
+            // Clear and rebuild status content
+            statusElem.textContent = '';
+            statusElem.appendChild(pillSpan);
+            statusElem.append(' ' + text);
+        }
+
+        function readQueryVariable(name, defaultValue) {
+            const re = new RegExp('.*[?&]' + name + '=([^&#]*)');
+            const match = document.location.href.match(re);
+
+            if (match) {
+                return decodeURIComponent(match[1]);
+            }
+
+            return defaultValue;
+        }
+
+        // --- RFB event handlers ---
+
+        function connectedToServer(e) {
+            const label = desktopName || 'remote desktop';
+            setStatus('ok', `Connected to ${label}`);
+        }
+
+        function disconnectedFromServer(e) {
+            if (e.detail.clean) {
+                setStatus('error', 'Disconnected from server');
+            } else {
+                setStatus('error', 'Connection closed unexpectedly');
+            }
+        }
+
+        function credentialsAreRequired(e) {
+            const password = prompt('Password required:');
+            if (password !== null) {
+                rfb.sendCredentials({ password: password });
+            }
+        }
+
+        function updateDesktopName(e) {
+            desktopName = e.detail.name;
+        }
+
+        function sendCtrlAltDel() {
+            if (rfb) {
+                rfb.sendCtrlAltDel();
+            }
+            return false;
+        }
+
+        document.getElementById('sendCtrlAltDelButton').onclick = sendCtrlAltDel;
+
+        // --- Connection parameters from query string ---
+
+        const host = readQueryVariable('host', window.location.hostname);
+        let port = readQueryVariable('port', window.location.port);
+        const password = readQueryVariable('password', undefined);
+        const path = readQueryVariable('path', 'websockify');
+        const scaleParam = readQueryVariable('scale', 'true');
+        const scale = (String(scaleParam).toLowerCase() === 'true');
+        const viewOnlyParam = readQueryVariable('view_only', 'false');
+        const viewOnly = (String(viewOnlyParam).toLowerCase() === 'true');
+
+        setStatus('connecting', 'Connecting to console...');
+
+        // --- Build WebSocket URL ---
+
+        let url;
+        if (window.location.protocol === 'https:') {
+            url = 'wss://';
+        } else {
+            url = 'ws://';
+        }
+        url += host;
+        if (port) {
+            url += ':' + port;
+        }
+        url += '/' + path;
+
+        // --- Create RFB connection ---
+
+        rfb = new RFB(screenElement, url, { credentials: { password: password } });
+
+        rfb.addEventListener('connect', connectedToServer);
+        //rfb.addEventListener('disconnect', disconnectedFromServer);
+        rfb.addEventListener('credentialsrequired', credentialsAreRequired);
+        rfb.addEventListener('desktopname', updateDesktopName);
+
+        window.addEventListener("message", (e) => { /* future */ });
+
+        rfb.addEventListener("disconnect", function (e) {
+            disconnectedFromServer(e);
+            try {
+                window.parent.postMessage({ type: "console-disconnected" }, "*");
+            } catch {}
+        });
+
+        rfb.viewOnly = viewOnly;
+        rfb.scaleViewport = scale;</script>
+</head>
+<body>
+    <div id="top_bar">
+        <div id="status">
+            <!-- Status pill + text injected here -->
+        </div>
+        <button id="sendCtrlAltDelButton" type="button">
+            Ctrl+Alt+Del
+        </button>
+    </div>
+    <div id="screen">
+        <!-- Remote desktop will be rendered here -->
+    </div>
+</body>
+</html>

@@ -221,6 +221,15 @@ namespace VmPortal.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("LastSyncedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("MaxCpuCores")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxDiskGiB")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxMemoryMiB")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("MemoryMiB")
                         .HasColumnType("INTEGER");
 
@@ -276,6 +285,15 @@ namespace VmPortal.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxCpuCores")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxDiskGiB")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxMemoryMiB")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Name")

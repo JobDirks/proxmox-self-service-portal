@@ -46,6 +46,9 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // HTTP Context Accessor for authorization handlers
 builder.Services.AddHttpContextAccessor();
 
+// HttpClient
+builder.Services.AddHttpClient();
+
 // VM Resource Limits configuration
 builder.Services.Configure<VmResourceLimitsOptions>(
     builder.Configuration.GetSection("VmResourceLimits"));

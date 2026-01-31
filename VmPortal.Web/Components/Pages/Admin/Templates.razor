@@ -12,7 +12,7 @@
 
 <PageTitle>VM Templates</PageTitle>
 
-<h1>VM Templates</h1>
+<h1 class="h3 mb-3">VM Templates</h1>
 
 @if (_loading)
 {
@@ -38,6 +38,7 @@ else
                                 <th>Node</th>
                                 <th>Template VMID</th>
                                 <th>Defaults</th>
+                                <th>Limits</th>
                                 <th>Active</th>
                             </tr>
                         </thead>
@@ -56,6 +57,13 @@ else
                                         </small>
                                     </td>
                                     <td>
+                                        <small class="text-muted">
+                                            CPU max: @(template.MaxCpuCores?.ToString() ?? "—"),
+                                            RAM max: @(template.MaxMemoryMiB?.ToString() ?? "—") MiB,
+                                            Disk max: @(template.MaxDiskGiB?.ToString() ?? "—") GiB
+                                        </small>
+                                    </td>
+                                    <td>
                                         @if (template.IsActive)
                                         {
                                             <span class="badge bg-success">Active</span>
@@ -64,6 +72,15 @@ else
                                         {
                                             <span class="badge bg-secondary">Inactive</span>
                                         }
+                                    </td>
+                                </tr>
+                            }
+
+                            @if (_templates.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-3">
+                                        No templates defined yet.
                                     </td>
                                 </tr>
                             }
@@ -81,7 +98,7 @@ else
                 <div class="card-body">
                     @if (!string.IsNullOrEmpty(_validationError))
                     {
-                        <div class="alert alert-warning">
+                        <div class="alert alert-warning py-2 mb-3">
                             @_validationError
                         </div>
                     }
@@ -116,24 +133,48 @@ else
 
                     <div class="row mb-3">
                         <div class="col-4">
-                            <label class="form-label">CPU</label>
+                            <label class="form-label">Default CPU</label>
                             <input class="form-control"
                                    type="number"
                                    @bind="_cpu"
                                    @bind:event="oninput" />
                         </div>
                         <div class="col-4">
-                            <label class="form-label">RAM (MiB)</label>
+                            <label class="form-label">Default RAM (MiB)</label>
                             <input class="form-control"
                                    type="number"
                                    @bind="_memoryMiB"
                                    @bind:event="oninput" />
                         </div>
                         <div class="col-4">
-                            <label class="form-label">Disk (GiB)</label>
+                            <label class="form-label">Default Disk (GiB)</label>
                             <input class="form-control"
                                    type="number"
                                    @bind="_diskGiB"
+                                   @bind:event="oninput" />
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-4">
+                            <label class="form-label">Max CPU (opt.)</label>
+                            <input class="form-control"
+                                   type="number"
+                                   @bind="_maxCpu"
+                                   @bind:event="oninput" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Max RAM (MiB, opt.)</label>
+                            <input class="form-control"
+                                   type="number"
+                                   @bind="_maxMemoryMiB"
+                                   @bind:event="oninput" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Max Disk (GiB, opt.)</label>
+                            <input class="form-control"
+                                   type="number"
+                                   @bind="_maxDiskGiB"
                                    @bind:event="oninput" />
                         </div>
                     </div>
@@ -180,6 +221,11 @@ else
     private int _cpu = 2;
     private int _memoryMiB = 2048;
     private int _diskGiB = 20;
+
+    private int? _maxCpu;
+    private int? _maxMemoryMiB;
+    private int? _maxDiskGiB;
+
     private string? _description;
     private bool _isActive = true;
 
@@ -218,7 +264,7 @@ else
             string name = (_name ?? string.Empty).Trim();
             string node = (_node ?? string.Empty).Trim();
 
-            Logger.LogInformation("Template form submit (simple): Name='{Name}', Node='{Node}', TemplateVmId={TemplateVmId}",
+            Logger.LogInformation("Template form submit: Name='{Name}', Node='{Node}', TemplateVmId={TemplateVmId}",
                 name, node, _templateVmId);
 
             if (string.IsNullOrEmpty(name))
@@ -245,6 +291,70 @@ else
                 return;
             }
 
+            if (_cpu <= 0)
+            {
+                _validationError = "Default CPU must be positive.";
+                _saving = false;
+                return;
+            }
+
+            if (_memoryMiB <= 0)
+            {
+                _validationError = "Default RAM must be positive.";
+                _saving = false;
+                return;
+            }
+
+            if (_diskGiB <= 0)
+            {
+                _validationError = "Default Disk must be positive.";
+                _saving = false;
+                return;
+            }
+
+            // Max validations (optional)
+            if (_maxCpu.HasValue && _maxCpu.Value <= 0)
+            {
+                _validationError = "Max CPU must be positive when set.";
+                _saving = false;
+                return;
+            }
+
+            if (_maxMemoryMiB.HasValue && _maxMemoryMiB.Value <= 0)
+            {
+                _validationError = "Max RAM must be positive when set.";
+                _saving = false;
+                return;
+            }
+
+            if (_maxDiskGiB.HasValue && _maxDiskGiB.Value <= 0)
+            {
+                _validationError = "Max Disk must be positive when set.";
+                _saving = false;
+                return;
+            }
+
+            if (_maxCpu.HasValue && _cpu > _maxCpu.Value)
+            {
+                _validationError = "Default CPU cannot exceed Max CPU.";
+                _saving = false;
+                return;
+            }
+
+            if (_maxMemoryMiB.HasValue && _memoryMiB > _maxMemoryMiB.Value)
+            {
+                _validationError = "Default RAM cannot exceed Max RAM.";
+                _saving = false;
+                return;
+            }
+
+            if (_maxDiskGiB.HasValue && _diskGiB > _maxDiskGiB.Value)
+            {
+                _validationError = "Default Disk cannot exceed Max Disk.";
+                _saving = false;
+                return;
+            }
+
             VmTemplate template = new VmTemplate
             {
                 Id = Guid.NewGuid(),
@@ -254,6 +364,9 @@ else
                 DefaultCpuCores = _cpu,
                 DefaultMemoryMiB = _memoryMiB,
                 DefaultDiskGiB = _diskGiB,
+                MaxCpuCores = _maxCpu,
+                MaxMemoryMiB = _maxMemoryMiB,
+                MaxDiskGiB = _maxDiskGiB,
                 Description = _description,
                 IsActive = _isActive,
                 CreatedAt = DateTimeOffset.UtcNow
@@ -272,6 +385,9 @@ else
             _cpu = 2;
             _memoryMiB = 2048;
             _diskGiB = 20;
+            _maxCpu = null;
+            _maxMemoryMiB = null;
+            _maxDiskGiB = null;
             _description = null;
             _isActive = true;
             _validationError = null;

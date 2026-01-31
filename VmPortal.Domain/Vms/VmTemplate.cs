@@ -2,7 +2,7 @@ using System;
 
 namespace VmPortal.Domain.Vms
 {
-    public class VmTemplate
+    public sealed class VmTemplate
     {
         public Guid Id { get; set; }
 
@@ -13,6 +13,9 @@ namespace VmPortal.Domain.Vms
         public int DefaultCpuCores { get; set; }
         public int DefaultMemoryMiB { get; set; }
         public int DefaultDiskGiB { get; set; }
+        public int? MaxCpuCores { get; set; }
+        public int? MaxMemoryMiB { get; set; }
+        public int? MaxDiskGiB { get; set; }
 
         public bool IsActive { get; set; } = true;
         public string? Description { get; set; }

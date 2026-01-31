@@ -16,6 +16,10 @@
 @inject IInputSanitizer Sanitizer
 @inject NavigationManager Nav
 @inject Microsoft.Extensions.Options.IOptions<VmResourceLimitsOptions> VmLimitsOptions
+@inject IJSRuntime JS
+@using VmPortal.Application.Console
+@inject IConsoleSessionService ConsoleSessionService
+@implements IAsyncDisposable
 
 <PageTitle>VM Details</PageTitle>
 
@@ -35,82 +39,184 @@ else if (_vm == null)
 }
 else
 {
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-            <h1 class="h3 mb-1">@Sanitizer.SanitizeForDisplay(_vm.Name)</h1>
-            <div class="text-muted">
-                Node: @Sanitizer.SanitizeForDisplay(_vm.Node),
-                VMID: @_vm.VmId
+    <div class="mb-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-center">
+            <div class="mb-2">
+                <h1 class="h3 mb-1">@Sanitizer.SanitizeForDisplay(_vm.Name)</h1>
+                <div class="text-muted small">
+                    Node: @Sanitizer.SanitizeForDisplay(_vm.Node),
+                    VMID: @_vm.VmId
+                </div>
             </div>
-        </div>
-        <div>
-            <span class="badge @GetStatusBadgeClass(_vm.Status)">
-                @_vm.Status
-            </span>
+            <div class="mb-2">
+                <span class="badge @GetStatusBadgeClass(_vm.Status) me-2">
+                    @_vm.Status
+                </span>
+                <span class="text-muted small">
+                    Last synced: @_vm.LastSyncedAt.ToString("u")
+                </span>
+            </div>
         </div>
     </div>
 
     @if (!string.IsNullOrEmpty(_message))
     {
-        <div class="alert @(_isError ? "alert-danger" : "alert-success")">
+        <div class="alert @(_isError ? "alert-danger" : "alert-success") mb-3">
             @_message
         </div>
     }
 
-    <div class="card mb-3">
-        <div class="card-header">
-            Actions
-        </div>
-        <div class="card-body">
-            <div class="btn-toolbar" role="toolbar">
-                <div class="btn-group me-2" role="group">
-                    <button class="btn btn-success btn-sm"
-                            disabled="@(!_canStart || _busy || _vm.VmId <= 0)"
-                            @onclick="StartVm">
-                        <i class="fas fa-play me-1"></i> Start
-                    </button>
-                    <button class="btn btn-warning btn-sm"
-                            disabled="@(!_canShutdown || _busy || _vm.VmId <= 0)"
-                            @onclick="ShutdownVm">
-                        <i class="fas fa-power-off me-1"></i> Shutdown
-                    </button>
-                    <button class="btn btn-danger btn-sm"
-                            disabled="@(!_canHardStop || _busy || _vm.VmId <= 0)"
-                            @onclick="HardStopVm">
-                        <i class="fas fa-stop me-1"></i> Hard Stop
-                    </button>
+    <div class="row">
+        <div class="col-lg-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    Power & Actions
                 </div>
-                <div class="btn-group me-2" role="group">
-                    <button class="btn btn-primary btn-sm"
-                            disabled="@(!_canRestart || _busy || _vm.VmId <= 0)"
-                            @onclick="RestartVm">
-                        <i class="fas fa-redo me-1"></i> Restart
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm"
-                            disabled="@(!_canReset || _busy || _vm.VmId <= 0)"
-                            @onclick="ResetVm">
-                        <i class="fas fa-bolt me-1"></i> Hard Reset
-                    </button>
-                </div>
-                <div class="btn-group me-2" role="group">
-                    <button class="btn btn-outline-secondary btn-sm"
-                            disabled="@(!_canPause || _busy || _vm.VmId <= 0)"
-                            @onclick="PauseVm">
-                        <i class="fas fa-pause me-1"></i> Pause
-                    </button>
-                    <button class="btn btn-outline-secondary btn-sm"
-                            disabled="@(!_canResume || _busy || _vm.VmId <= 0)"
-                            @onclick="ResumeVm">
-                        <i class="fas fa-play-circle me-1"></i> Resume
-                    </button>
-                </div>
-                <div class="btn-group" role="group">
+                <div class="card-body">
+                    <p class="text-muted small">
+                        Use these actions to start, stop or restart the VM. Advanced actions are available as needed.
+                    </p>
+
+                    <div class="mb-3">
+                        <div class="btn-group me-2 mb-2" role="group">
+                            <button class="btn btn-success btn-sm"
+                                    disabled="@(!_canStart || _busy || _vm.VmId <= 0)"
+                                    @onclick="StartVm">
+                                <i class="fas fa-play me-1"></i> Start
+                            </button>
+                            <button class="btn btn-warning btn-sm"
+                                    disabled="@(!_canShutdown || _busy || _vm.VmId <= 0)"
+                                    @onclick="ShutdownVm">
+                                <i class="fas fa-power-off me-1"></i> Shutdown
+                            </button>
+                            <button class="btn btn-primary btn-sm"
+                                    disabled="@(!_canRestart || _busy || _vm.VmId <= 0)"
+                                    @onclick="RestartVm">
+                                <i class="fas fa-redo me-1"></i> Restart
+                            </button>
+                        </div>
+                    </div>
+
+                    <details class="mb-3">
+                        <summary class="small text-muted">
+                            Advanced actions
+                        </summary>
+                        <div class="mt-2">
+                            <div class="btn-group me-2 mb-2" role="group">
+                                <button class="btn btn-outline-danger btn-sm"
+                                        disabled="@(!_canHardStop || _busy || _vm.VmId <= 0)"
+                                        @onclick="HardStopVm">
+                                    <i class="fas fa-stop me-1"></i> Hard Stop
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm"
+                                        disabled="@(!_canReset || _busy || _vm.VmId <= 0)"
+                                        @onclick="ResetVm">
+                                    <i class="fas fa-bolt me-1"></i> Hard Reset
+                                </button>
+                            </div>
+                            <div class="btn-group mb-2" role="group">
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        disabled="@(!_canPause || _busy || _vm.VmId <= 0)"
+                                        @onclick="PauseVm">
+                                    <i class="fas fa-pause me-1"></i> Pause
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        disabled="@(!_canResume || _busy || _vm.VmId <= 0)"
+                                        @onclick="ResumeVm">
+                                    <i class="fas fa-play-circle me-1"></i> Resume
+                                </button>
+                            </div>
+                        </div>
+                    </details>
+
                     <button class="btn btn-outline-info btn-sm"
                             disabled="@_busy"
                             @onclick="RefreshStatus">
-                        <i class="fas fa-sync-alt me-1"></i> Refresh
+                        <i class="fas fa-sync-alt me-1"></i> Refresh status
                     </button>
                 </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    Access (RDP, SSH & Console)
+                </div>
+                <div class="card-body">
+                    @if (_vm != null)
+                    {
+                        <div class="mb-2">
+                            @if (_vm.Status == VmStatus.Running)
+                            {
+                                <span class="badge bg-success me-2">Status: Running</span>
+                                <span class="text-muted small">Remote access is available.</span>
+                            }
+                            else if (_vm.Status == VmStatus.Stopped)
+                            {
+                                <span class="badge bg-secondary me-2">Status: Stopped</span>
+                                <span class="text-warning small">
+                                    Start the VM to use console, RDP or SSH.
+                                </span>
+                            }
+                            else if (_vm.Status == VmStatus.Paused)
+                            {
+                                <span class="badge bg-warning text-dark me-2">Status: Paused</span>
+                                <span class="text-muted small">
+                                    Resume the VM to interact with it.
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-dark me-2">Status: @_vm.Status</span>
+                            }
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_consoleError))
+                    {
+                        <div class="alert alert-danger py-1 mb-2">
+                            @_consoleError
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_consoleStatus))
+                    {
+                        <div class="alert alert-info py-1 mb-2">
+                            @_consoleStatus
+                        </div>
+                    }
+
+                    <p class="text-muted small mb-2">
+                        Opens an embedded console via Proxmox (noVNC) in the panel below.
+                    </p>
+
+                    <button class="btn btn-sm btn-dark mb-2"
+                            disabled="@(_consoleOpening || _vm == null || _vm.VmId <= 0 || _vm.Status != VmStatus.Running)"
+                            @onclick="OpenConsoleAsync">
+                        @if (_consoleOpening)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Open Console
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Console
+        </div>
+        <div class="card-body p-0">
+            <div class="border-0"
+                 style="width: 100%; height: 75vh; overflow: hidden;">
+                <iframe id="vnc-iframe"
+                        src=""
+                        allow="pointer-lock"
+                        style="width: 100%; height: 100%; border: none; background-color: #000; overflow: hidden;">
+                </iframe>
             </div>
         </div>
     </div>
@@ -120,24 +226,66 @@ else
             Resources
         </div>
         <div class="card-body">
-            <dl class="row">
-                <dt class="col-sm-3">CPU Cores</dt>
-                <dd class="col-sm-9">@_vm.CpuCores</dd>
+            @if (_vm != null)
+            {
+                Vm vmLocal = _vm!;
 
-                <dt class="col-sm-3">Memory (MiB)</dt>
-                <dd class="col-sm-9">@_vm.MemoryMiB</dd>
+                <dl class="row mb-2">
+                    <dt class="col-sm-3">CPU Cores</dt>
+                    <dd class="col-sm-9">
+                        @vmLocal.CpuCores
+                        @if (_effectiveMaxCpuCores > 0)
+                        {
+                            <span class="text-muted small"> / @_effectiveMaxCpuCores</span>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div class="progress-bar bg-info"
+                                     role="progressbar"
+                                     style="width: @GetCpuUsagePercent()%;">
+                                </div>
+                            </div>
+                        }
+                    </dd>
 
-                <dt class="col-sm-3">Disk (GiB)</dt>
-                <dd class="col-sm-9">@_vm.DiskGiB</dd>
+                    <dt class="col-sm-3">Memory (MiB)</dt>
+                    <dd class="col-sm-9">
+                        @vmLocal.MemoryMiB
+                        @if (_effectiveMaxMemoryMiB > 0)
+                        {
+                            <span class="text-muted small"> / @_effectiveMaxMemoryMiB</span>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div class="progress-bar bg-success"
+                                     role="progressbar"
+                                     style="width: @GetMemoryUsagePercent()%;">
+                                </div>
+                            </div>
+                        }
+                    </dd>
 
-                <dt class="col-sm-3">Last Synced</dt>
-                <dd class="col-sm-9">@_vm.LastSyncedAt.ToString("u")</dd>
-            </dl>
+                    <dt class="col-sm-3">Disk (GiB)</dt>
+                    <dd class="col-sm-9">
+                        @vmLocal.DiskGiB
+                        @if (_effectiveMaxDiskGiB > 0)
+                        {
+                            <span class="text-muted small"> / @_effectiveMaxDiskGiB</span>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div class="progress-bar bg-warning"
+                                     role="progressbar"
+                                     style="width: @GetDiskUsagePercent()%;">
+                                </div>
+                            </div>
+                        }
+                    </dd>
+                </dl>
+            }
+
+            <p class="text-muted small">
+                Changes to CPU and memory will apply on next reboot. Disk resize applies immediately.
+            </p>
 
             <hr />
 
             <h5 class="mt-3">Adjust Resources</h5>
-            <p class="text-muted mb-3">
+            <p class="text-muted mb-3 small">
                 You can increase CPU, memory and disk size within the configured limits.
                 Decreasing resources is not allowed.
             </p>
@@ -148,6 +296,12 @@ else
                 <ValidationSummary />
 
                 <fieldset disabled="@_busy">
+                    @if (_vm != null && _vm.Status == VmStatus.Running)
+                    {
+                        <div class="alert alert-warning py-1 small">
+                            Some changes may only apply after a reboot.
+                        </div>
+                    }
                     <div class="row mb-3">
                         <div class="col-md-4">
                             <label class="form-label">CPU Cores</label>
@@ -156,12 +310,12 @@ else
                                 string? cpuError = GetCpuError();
                                 if (!string.IsNullOrEmpty(cpuError))
                                 {
-                                    <div class="text-danger">@cpuError</div>
+                                    <div class="text-danger small">@cpuError</div>
                                 }
                                 else
                                 {
                                     <div class="form-text">
-                                        Min: @_vm.CpuCores, Max: @_limits.MaxCpuCores
+                                        Allowed: 1 – @_effectiveMaxCpuCores (current: @_vm!.CpuCores)
                                     </div>
                                 }
                             }
@@ -173,12 +327,12 @@ else
                                 string? memError = GetMemoryError();
                                 if (!string.IsNullOrEmpty(memError))
                                 {
-                                    <div class="text-danger">@memError</div>
+                                    <div class="text-danger small">@memError</div>
                                 }
                                 else
                                 {
                                     <div class="form-text">
-                                        Min: @_vm.MemoryMiB, Max: @_limits.MaxMemoryMiB
+                                        Allowed: 1 – @_effectiveMaxMemoryMiB MiB (current: @_vm!.MemoryMiB MiB)
                                     </div>
                                 }
                             }
@@ -190,20 +344,20 @@ else
                                 string? diskError = GetDiskError();
                                 if (!string.IsNullOrEmpty(diskError))
                                 {
-                                    <div class="text-danger">@diskError</div>
+                                    <div class="text-danger small">@diskError</div>
                                 }
                                 else
                                 {
                                     <div class="form-text">
-                                        Min: @_vm.DiskGiB, Max: @_limits.MaxDiskGiB
+                                        Min: @_vm!.DiskGiB GiB, Max: @_effectiveMaxDiskGiB GiB (disk can only be increased)
                                     </div>
                                 }
                             }
                         </div>
                     </div>
 
-                    <button type="submit" class="btn btn-primary"
-                            disabled="@(_busy || _vm.VmId <= 0)">
+                    <button type="submit" class="btn btn-primary btn-sm"
+                            disabled="@(_busy || _vm!.VmId <= 0)">
                         @if (_busy)
                         {
                             <span class="spinner-border spinner-border-sm me-1"></span>
@@ -215,15 +369,16 @@ else
         </div>
     </div>
 
-    <div class="d-flex justify-content-between">
+    <div class="d-flex justify-content-between mt-3">
         <button class="btn btn-secondary" @onclick="BackToList">
             Back to My VMs
         </button>
-        <!-- Console integration to be implemented later -->
-        <button class="btn btn-outline-dark" disabled>
-            Console (NoVNC) - planned
-        </button>
+        <span class="text-muted small align-self-center">
+            Console powered by Proxmox noVNC.
+        </span>
     </div>
+
+    <br />
 }
 
 @code {
@@ -235,6 +390,7 @@ else
     private bool _busy = false;
     private string? _message;
     private bool _isError;
+    private CancellationTokenSource? _messageCts;
 
     private bool _canStart;
     private bool _canShutdown;
@@ -243,6 +399,13 @@ else
     private bool _canReset;
     private bool _canPause;
     private bool _canResume;
+
+    private bool _consoleOpening;
+    private string? _consoleStatus;
+    private string? _consoleError;
+    private string? _currentConsoleSessionId;
+
+    private CancellationTokenSource? _statusRefreshCts;
 
     private VmResourceLimitsOptions _limits = new VmResourceLimitsOptions();
 
@@ -255,11 +418,16 @@ else
         public int DiskGiB { get; set; }
     }
 
+    private int _effectiveMaxCpuCores;
+    private int _effectiveMaxMemoryMiB;
+    private int _effectiveMaxDiskGiB;
+
     protected override async Task OnInitializedAsync()
     {
         await base.OnInitializedAsync();
         _limits = VmLimitsOptions.Value;
         await LoadVmAsync();
+        StartStatusRefreshLoop();
     }
 
     private async Task LoadVmAsync()
@@ -269,6 +437,33 @@ else
             _vm = await Db.Vms.FirstOrDefaultAsync(v => v.Id == Id);
             if (_vm != null)
             {
+                // Compute effective max CPU
+                int cpuMax = _limits.MaxCpuCores > 0 ? _limits.MaxCpuCores : int.MaxValue;
+                if (_vm.MaxCpuCores.HasValue)
+                {
+                    cpuMax = Math.Min(cpuMax, _vm.MaxCpuCores.Value);
+                }
+
+                _effectiveMaxCpuCores = cpuMax == int.MaxValue ? 0 : cpuMax;
+
+                // Effective max memory
+                int memMax = _limits.MaxMemoryMiB > 0 ? _limits.MaxMemoryMiB : int.MaxValue;
+                if (_vm.MaxMemoryMiB.HasValue)
+                {
+                    memMax = Math.Min(memMax, _vm.MaxMemoryMiB.Value);
+                }
+
+                _effectiveMaxMemoryMiB = memMax == int.MaxValue ? 0 : memMax;
+
+                // Effective max disk
+                int diskMax = _limits.MaxDiskGiB > 0 ? _limits.MaxDiskGiB : int.MaxValue;
+                if (_vm.MaxDiskGiB.HasValue)
+                {
+                    diskMax = Math.Min(diskMax, _vm.MaxDiskGiB.Value);
+                }
+
+                _effectiveMaxDiskGiB = diskMax == int.MaxValue ? 0 : diskMax;
+
                 UpdateActionAvailability();
                 _resourceModel = new ResourceUpdateModel
                 {
@@ -325,35 +520,56 @@ else
         };
     }
 
-    private async Task RefreshStatus()
+    private Task RefreshStatus() => RefreshStatusInternalAsync(true);
+
+    private async Task RefreshStatusInternalAsync(bool showUiFeedback)
     {
-        if (_vm == null || _busy || _vm.VmId <= 0)
+        if (_vm == null || _vm.VmId <= 0)
         {
             return;
         }
 
-        _busy = true;
-        ClearMessage();
-        StateHasChanged();
+        if (showUiFeedback)
+        {
+            _busy = true;
+            ClearMessage();
+            StateHasChanged();
+        }
 
         try
         {
             VmStatus status = await Proxmox.GetVmStatusAsync(_vm.Node, _vm.VmId);
+
+            bool statusChanged = _vm.Status != status;
             _vm.Status = status;
             _vm.LastSyncedAt = DateTimeOffset.UtcNow;
-            await Db.SaveChangesAsync();
 
-            UpdateActionAvailability();
-            ShowMessage($"Status refreshed: {status}", false);
+            if (statusChanged)
+            {
+                UpdateActionAvailability();
+                await Db.SaveChangesAsync();
+            }
+
+            if (showUiFeedback)
+            {
+                ShowMessage($"Status refreshed: {status}", false);
+            }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to refresh status for VM {Vm}", _vm.Id);
-            ShowMessage("Failed to refresh VM status.", true);
+            if (showUiFeedback)
+            {
+                ShowMessage("Failed to refresh VM status.", true);
+            }
         }
         finally
         {
-            _busy = false;
+            if (showUiFeedback)
+            {
+                _busy = false;
+            }
+
             StateHasChanged();
         }
     }
@@ -400,7 +616,7 @@ else
             ShowMessage(successMessage, false);
 
             await Task.Delay(1000);
-            await RefreshStatus();
+            await RefreshStatusInternalAsync(true);
         }
         catch (Exception ex)
         {
@@ -431,14 +647,9 @@ else
             return "CPU cores must be positive.";
         }
 
-        if (newCpu < _vm.CpuCores)
+        if (_effectiveMaxCpuCores > 0 && newCpu > _effectiveMaxCpuCores)
         {
-            return $"CPU cores cannot be smaller than the current value ({_vm.CpuCores}).";
-        }
-
-        if (_limits.MaxCpuCores > 0 && newCpu > _limits.MaxCpuCores)
-        {
-            return $"CPU cores cannot exceed the configured maximum ({_limits.MaxCpuCores}).";
+            return $"CPU cores cannot exceed the configured maximum ({_effectiveMaxCpuCores}).";
         }
 
         return null;
@@ -457,14 +668,9 @@ else
             return "Memory must be positive.";
         }
 
-        if (newMem < _vm.MemoryMiB)
+        if (_effectiveMaxMemoryMiB > 0 && newMem > _effectiveMaxMemoryMiB)
         {
-            return $"Memory cannot be smaller than the current value ({_vm.MemoryMiB} MiB).";
-        }
-
-        if (_limits.MaxMemoryMiB > 0 && newMem > _limits.MaxMemoryMiB)
-        {
-            return $"Memory cannot exceed the configured maximum ({_limits.MaxMemoryMiB} MiB).";
+            return $"Memory cannot exceed the configured maximum ({_effectiveMaxMemoryMiB} MiB).";
         }
 
         return null;
@@ -488,9 +694,9 @@ else
             return $"Disk size cannot be smaller than the current value ({_vm.DiskGiB} GiB).";
         }
 
-        if (_limits.MaxDiskGiB > 0 && newDisk > _limits.MaxDiskGiB)
+        if (_effectiveMaxDiskGiB > 0 && newDisk > _effectiveMaxDiskGiB)
         {
-            return $"Disk size cannot exceed the configured maximum ({_limits.MaxDiskGiB} GiB).";
+            return $"Disk size cannot exceed the configured maximum ({_effectiveMaxDiskGiB} GiB).";
         }
 
         return null;
@@ -590,8 +796,42 @@ else
 
     private void ShowMessage(string message, bool isError)
     {
+        // Cancel any pending auto-clear
+        _messageCts?.Cancel();
+        _messageCts = new CancellationTokenSource();
+        CancellationToken token = _messageCts.Token;
+
         _message = message;
         _isError = isError;
+        StateHasChanged();
+
+        // Fire-and-forget task to clear message after 10 seconds
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), token);
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                await InvokeAsync(() =>
+                {
+                    // Only clear if it’s still the same message
+                    if (_message == message)
+                    {
+                        _message = null;
+                        _isError = false;
+                        StateHasChanged();
+                    }
+                });
+            }
+            catch (TaskCanceledException)
+            {
+                // ignore
+            }
+        }, token);
     }
 
     private void ClearMessage()
@@ -604,4 +844,195 @@ else
     {
         Nav.NavigateTo("/my-vms");
     }
+
+    private async Task OpenConsoleAsync()
+    {
+        if (_vm == null || _consoleOpening)
+        {
+            return;
+        }
+
+        _consoleOpening = true;
+        _consoleError = null;
+        _consoleStatus = null;
+        StateHasChanged();
+
+        try
+        {
+            if (string.IsNullOrEmpty(CurrentUserId))
+            {
+                _consoleError = "Current user could not be resolved.";
+                return;
+            }
+
+            if (_vm.Status != VmStatus.Running)
+            {
+                _consoleError = $"VM is not running (current status: {_vm.Status}). Start the VM before opening the console.";
+                return;
+            }
+
+            if (_vm.VmId <= 0 || string.IsNullOrWhiteSpace(_vm.Node))
+            {
+                _consoleError = "This VM is not linked to a Proxmox VMID or node.";
+                return;
+            }
+
+            string nodeName = _vm.Node.Trim();
+
+            _consoleStatus = "Opening console session...";
+            StateHasChanged();
+
+            string sessionId = await ConsoleSessionService.CreateSessionAsync(
+                nodeName,
+                _vm.VmId,
+                CurrentUserId!,
+                default);
+
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                _consoleError = "Console session id is empty.";
+                return;
+            }
+
+            _currentConsoleSessionId = sessionId;
+
+            ConsoleSession? session = ConsoleSessionService.GetSession(sessionId);
+            if (session == null)
+            {
+                _consoleError = "Console session could not be retrieved.";
+                return;
+            }
+
+            string vncTicket = session.Ticket;
+            if (string.IsNullOrEmpty(vncTicket))
+            {
+                _consoleError = "VNC ticket is empty.";
+                return;
+            }
+
+            _consoleStatus = "Console session created. Connecting noVNC...";
+            StateHasChanged();
+
+            await JS.InvokeVoidAsync(
+                "vmConsole.openConsoleWithNoVnc",
+                "vnc-iframe",
+                _currentConsoleSessionId,
+                vncTicket);
+
+            _consoleStatus = "Console connected (noVNC running in iframe).";
+        }
+        catch (Exception ex)
+        {
+            _consoleError = "An error occurred while opening the console: " + ex.Message;
+        }
+        finally
+        {
+            _consoleOpening = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartStatusRefreshLoop()
+    {
+        _statusRefreshCts?.Cancel();
+        _statusRefreshCts = new CancellationTokenSource();
+        CancellationToken token = _statusRefreshCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+
+                while (await timer.WaitForNextTickAsync(token))
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    // Avoid interfering if another action is in progress
+                    await InvokeAsync(async () =>
+                    {
+                        try
+                        {
+                            // Do not refresh status while console is active/opening to avoid
+                            // any possible interference with the console session.
+                            if (_consoleOpening || !string.IsNullOrEmpty(_currentConsoleSessionId))
+                            {
+                                return;
+                            }
+
+                            await RefreshStatusInternalAsync(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError(ex, "Periodic status refresh failed for VM {VmId}", Id);
+                        }
+                    });
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore cancellation
+            }
+        }, token);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_statusRefreshCts != null)
+        {
+            _statusRefreshCts.Cancel();
+            _statusRefreshCts.Dispose();
+            _statusRefreshCts = null;
+        }
+
+        if (_messageCts != null)
+        {
+            _messageCts.Cancel();
+            _messageCts.Dispose();
+            _messageCts = null;
+        }
+
+        await Task.CompletedTask;
+    }
+
+
+    private int GetCpuUsagePercent()
+    {
+        if (_vm == null || _effectiveMaxCpuCores <= 0)
+        {
+            return 0;
+        }
+
+        double ratio = (double)_vm.CpuCores / _effectiveMaxCpuCores;
+        int pct = (int)Math.Round(100.0 * ratio);
+        return Math.Max(0, Math.Min(100, pct));
+    }
+
+    private int GetMemoryUsagePercent()
+    {
+        if (_vm == null || _effectiveMaxMemoryMiB <= 0)
+        {
+            return 0;
+        }
+
+        double ratio = (double)_vm.MemoryMiB / _effectiveMaxMemoryMiB;
+        int pct = (int)Math.Round(100.0 * ratio);
+        return Math.Max(0, Math.Min(100, pct));
+    }
+
+    private int GetDiskUsagePercent()
+    {
+        if (_vm == null || _effectiveMaxDiskGiB <= 0)
+        {
+            return 0;
+        }
+
+        double ratio = (double)_vm.DiskGiB / _effectiveMaxDiskGiB;
+        int pct = (int)Math.Round(100.0 * ratio);
+        return Math.Max(0, Math.Min(100, pct));
+    }
+
 }

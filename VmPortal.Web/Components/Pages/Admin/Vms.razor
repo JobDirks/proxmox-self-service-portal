@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Authorization
 @attribute [Authorize(Policy = VmPortal.Domain.Security.SecurityConstants.Policies.Admin)]
 @inherits SecureComponentBase
+@using System.Linq
 @using Microsoft.EntityFrameworkCore
 @using VmPortal.Infrastructure.Data
 @using VmPortal.Domain.Vms
@@ -17,12 +18,12 @@
 <PageTitle>VM Administration</PageTitle>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h1><i class="fas fa-server"></i> VM Administration</h1>
+    <h1 class="h4 mb-0"><i class="fas fa-server me-2"></i> VM Administration</h1>
     <div class="d-flex gap-2">
         <button class="btn btn-outline-primary"
                 @onclick="RefreshAllVmsAsync"
-                disabled="@( _operationInProgress ? "disabled" : null)">
-            <i class="fas fa-sync-alt"></i> Refresh All
+                disabled="@_operationInProgress">
+            <i class="fas fa-sync-alt me-1"></i> Refresh All
         </button>
     </div>
 </div>
@@ -30,7 +31,7 @@
 @if (_rateLimitCooldown.HasValue)
 {
     <div class="alert alert-warning">
-        <i class="fas fa-clock"></i>
+        <i class="fas fa-clock me-1"></i>
         Admin operations rate limit active. Try again in @_rateLimitCooldown.Value.Minutes minutes.
     </div>
 }
@@ -49,32 +50,32 @@ else
         <div class="col-md-3">
             <div class="card text-center bg-light">
                 <div class="card-body">
-                    <h3 class="text-primary">@_vms.Count</h3>
-                    <p class="card-text">Total VMs</p>
+                    <h3 class="text-primary mb-0">@_vms.Count</h3>
+                    <p class="card-text small mb-0">Total VMs</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="card text-center bg-light">
                 <div class="card-body">
-                    <h3 class="text-success">@_vms.Count(v => v.Status == VmStatus.Running)</h3>
-                    <p class="card-text">Running</p>
+                    <h3 class="text-success mb-0">@_vms.Count(v => v.Status == VmStatus.Running)</h3>
+                    <p class="card-text small mb-0">Running</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="card text-center bg-light">
                 <div class="card-body">
-                    <h3 class="text-secondary">@_vms.Count(v => v.Status == VmStatus.Stopped)</h3>
-                    <p class="card-text">Stopped</p>
+                    <h3 class="text-secondary mb-0">@_vms.Count(v => v.Status == VmStatus.Stopped)</h3>
+                    <p class="card-text small mb-0">Stopped</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="card text-center bg-light">
                 <div class="card-body">
-                    <h3 class="text-info">@_owners.Count</h3>
-                    <p class="card-text">Owners</p>
+                    <h3 class="text-info mb-0">@_owners.Count</h3>
+                    <p class="card-text small mb-0">Owners</p>
                 </div>
             </div>
         </div>
@@ -83,34 +84,56 @@ else
     @if (_vms.Count == 0)
     {
         <div class="alert alert-info">
-            <h4 class="alert-heading"><i class="fas fa-info-circle"></i> No VMs Found</h4>
-            <p>No virtual machines are currently registered. Once you link VMs to users, they will appear here.</p>
+            <h4 class="alert-heading h6"><i class="fas fa-info-circle me-1"></i> No VMs Found</h4>
+            <p class="mb-0">No virtual machines are currently registered. Once you link VMs to users, they will appear here.</p>
         </div>
     }
     else
     {
         <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Virtual Machines</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <input class="form-control form-control-sm"
+                           style="min-width: 220px;"
+                           placeholder="Search by VM or owner..."
+                           @bind="_searchText"
+                           @bind:event="oninput" />
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th>VM</th>
-                            <th>Owner</th>
-                            <th>Node</th>
-                            <th>Status</th>
+                            <th role="button" @onclick="() => ChangeSort(AdminVmSortColumn.Name)">
+                                VM
+                                <i class="fas @GetSortIconClasses(AdminVmSortColumn.Name) ms-1"></i>
+                            </th>
+                            <th role="button" @onclick="() => ChangeSort(AdminVmSortColumn.Owner)">
+                                Owner
+                                <i class="fas @GetSortIconClasses(AdminVmSortColumn.Owner) ms-1"></i>
+                            </th>
+                            <th role="button" @onclick="() => ChangeSort(AdminVmSortColumn.Node)">
+                                Node
+                                <i class="fas @GetSortIconClasses(AdminVmSortColumn.Node) ms-1"></i>
+                            </th>
+                            <th role="button" @onclick="() => ChangeSort(AdminVmSortColumn.Status)">
+                                Status
+                                <i class="fas @GetSortIconClasses(AdminVmSortColumn.Status) ms-1"></i>
+                            </th>
                             <th>Resources</th>
-                            <th>Last Synced</th>
+                            <th role="button" @onclick="() => ChangeSort(AdminVmSortColumn.LastSynced)">
+                                Last Synced
+                                <i class="fas @GetSortIconClasses(AdminVmSortColumn.LastSynced) ms-1"></i>
+                            </th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (Vm vm in _vms)
+                        @foreach (Vm vm in GetFilteredVms())
                         {
                             User? owner = _owners.TryGetValue(vm.OwnerUserId, out User? o) ? o : null;
-                            <tr class="@(_operationInProgress && _currentVm?.Id == vm.Id ? "table-primary" : "")">
+                            <tr class="@(_operationInProgress && _currentVm?.Id == vm.Id ? "table-primary" : string.Empty)">
                                 <td>
                                     <div>
                                         <strong>@Sanitizer.SanitizeForDisplay(vm.Name)</strong><br />
@@ -197,14 +220,27 @@ else
 }
 
 @code {
-    private List<Vm> _vms = [];
-    private Dictionary<Guid, User> _owners = new();
+    private enum AdminVmSortColumn
+    {
+        Name,
+        Owner,
+        Node,
+        Status,
+        LastSynced
+    }
+
+    private List<Vm> _vms = new List<Vm>();
+    private Dictionary<Guid, User> _owners = new Dictionary<Guid, User>();
     private bool _loading = true;
     private bool _operationInProgress = false;
     private Vm? _currentVm = null;
     private string? _message = null;
     private bool _isError = false;
     private TimeSpan? _rateLimitCooldown = null;
+
+    private string _searchText = string.Empty;
+    private AdminVmSortColumn _sortColumn = AdminVmSortColumn.Name;
+    private bool _sortDescending = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -246,7 +282,10 @@ else
 
     private async Task<bool> CheckOperationRateLimitAsync(string operation)
     {
-        if (string.IsNullOrEmpty(CurrentUserId)) return false;
+        if (string.IsNullOrEmpty(CurrentUserId))
+        {
+            return false;
+        }
 
         bool allowed = await RateLimit.CheckRateLimitAsync(CurrentUserId, "admin_operations", 10, TimeSpan.FromMinutes(5));
         if (!allowed)
@@ -260,9 +299,123 @@ else
         return true;
     }
 
+    private IEnumerable<Vm> GetFilteredVms()
+    {
+        IEnumerable<Vm> query = _vms;
+
+        string term = _searchText?.Trim() ?? string.Empty;
+        if (term.Length > 0)
+        {
+            string lower = term.ToLowerInvariant();
+            query = query.Where(vm =>
+            {
+                string name = vm.Name ?? string.Empty;
+                string node = vm.Node ?? string.Empty;
+
+                bool matchesVm = name.Contains(lower, StringComparison.OrdinalIgnoreCase)
+                                 || node.Contains(lower, StringComparison.OrdinalIgnoreCase);
+
+                User? owner;
+                bool matchesOwner = false;
+                if (_owners.TryGetValue(vm.OwnerUserId, out owner) && owner != null)
+                {
+                    string display = owner.DisplayName ?? string.Empty;
+                    string email = owner.Email ?? string.Empty;
+
+                    matchesOwner = display.Contains(lower, StringComparison.OrdinalIgnoreCase)
+                                   || email.Contains(lower, StringComparison.OrdinalIgnoreCase);
+                }
+
+                return matchesVm || matchesOwner;
+            });
+        }
+
+        switch (_sortColumn)
+        {
+            case AdminVmSortColumn.Owner:
+                query = _sortDescending
+                    ? query.OrderByDescending(vm => GetOwnerSortKey(vm))
+                    : query.OrderBy(vm => GetOwnerSortKey(vm));
+                break;
+            case AdminVmSortColumn.Node:
+                query = _sortDescending
+                    ? query.OrderByDescending(vm => vm.Node)
+                    : query.OrderBy(vm => vm.Node);
+                break;
+            case AdminVmSortColumn.Status:
+                query = _sortDescending
+                    ? query.OrderByDescending(vm => vm.Status)
+                    : query.OrderBy(vm => vm.Status);
+                break;
+            case AdminVmSortColumn.LastSynced:
+                query = _sortDescending
+                    ? query.OrderByDescending(vm => vm.LastSyncedAt)
+                    : query.OrderBy(vm => vm.LastSyncedAt);
+                break;
+            case AdminVmSortColumn.Name:
+            default:
+                query = _sortDescending
+                    ? query.OrderByDescending(vm => vm.Name)
+                    : query.OrderBy(vm => vm.Name);
+                break;
+        }
+
+        return query;
+    }
+
+    private string GetOwnerSortKey(Vm vm)
+    {
+        User? owner;
+        if (_owners.TryGetValue(vm.OwnerUserId, out owner) && owner != null)
+        {
+            if (!string.IsNullOrEmpty(owner.DisplayName))
+            {
+                return owner.DisplayName;
+            }
+
+            if (!string.IsNullOrEmpty(owner.Email))
+            {
+                return owner.Email;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private void ChangeSort(AdminVmSortColumn column)
+    {
+        if (_sortColumn == column)
+        {
+            _sortDescending = !_sortDescending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortDescending = false;
+        }
+    }
+
+    private string GetSortIconClasses(AdminVmSortColumn column)
+    {
+        if (_sortColumn != column)
+        {
+            return "fa-sort text-muted";
+        }
+
+        if (_sortDescending)
+        {
+            return "fa-sort-down";
+        }
+
+        return "fa-sort-up";
+    }
+
     private async Task RefreshAllVmsAsync()
     {
-        if (!await CheckOperationRateLimitAsync("refresh_all")) return;
+        if (!await CheckOperationRateLimitAsync("refresh_all"))
+        {
+            return;
+        }
 
         _operationInProgress = true;
         StateHasChanged();
@@ -306,7 +459,10 @@ else
 
     private async Task RefreshStatusAsync(Vm vm)
     {
-        if (_operationInProgress || !Sanitizer.IsValidVmId(vm.VmId)) return;
+        if (_operationInProgress || !Sanitizer.IsValidVmId(vm.VmId))
+        {
+            return;
+        }
 
         _operationInProgress = true;
         _currentVm = vm;
@@ -357,8 +513,15 @@ else
         string operationKey,
         Func<string, int, System.Threading.CancellationToken, Task> proxmoxAction)
     {
-        if (!await CheckOperationRateLimitAsync(operationKey)) return;
-        if (_operationInProgress || !Sanitizer.IsValidVmId(vm.VmId)) return;
+        if (!await CheckOperationRateLimitAsync(operationKey))
+        {
+            return;
+        }
+
+        if (_operationInProgress || !Sanitizer.IsValidVmId(vm.VmId))
+        {
+            return;
+        }
 
         string sanitizedNode = Sanitizer.SanitizeNodeName(vm.Node);
         if (string.IsNullOrEmpty(sanitizedNode))
@@ -378,7 +541,6 @@ else
                 $"Operation: {actionName}, VM: {Sanitizer.SanitizeForLog(vm.Name)} ({vm.VmId})", "Information");
             ShowMessage($"{actionName} requested for {vm.Name}", false);
 
-            // Refresh after a delay
             _ = Task.Delay(3000).ContinueWith(async _ => await RefreshStatusAsync(vm));
         }
         catch (Exception ex)

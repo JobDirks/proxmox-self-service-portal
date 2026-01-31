@@ -15,6 +15,9 @@ namespace VmPortal.Domain.Vms
         public int CpuCores { get; set; }
         public int MemoryMiB { get; set; }
         public int DiskGiB { get; set; }
+        public int? MaxCpuCores { get; set; }
+        public int? MaxMemoryMiB { get; set; }
+        public int? MaxDiskGiB { get; set; }
         public DateTimeOffset LastSyncedAt { get; set; } = DateTimeOffset.UtcNow;
 
         public Guid OwnerUserId { get; set; }
