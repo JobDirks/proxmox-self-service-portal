@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VmPortal.Infrastructure.Data;
 
@@ -10,9 +11,11 @@ using VmPortal.Infrastructure.Data;
 namespace VmPortal.Infrastructure.Migrations
 {
     [DbContext(typeof(VmPortalDbContext))]
-    partial class VmPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260131222217_AddVmTemplateVmId")]
+    partial class AddVmTemplateVmId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
@@ -248,9 +251,6 @@ namespace VmPortal.Infrastructure.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
-
-                    b.Property<Guid?>("TemplateId")
-                        .HasColumnType("TEXT");
 
                     b.Property<int?>("TemplateVmId")
                         .HasColumnType("INTEGER");
