@@ -16,15 +16,70 @@ namespace VmPortal.Infrastructure.Proxmox
         private readonly HttpClient _http;
         private readonly ProxmoxOptions _opt;
 
-        public ProxmoxClient(HttpClient http, IOptions<ProxmoxOptions> options)
+        private readonly ProxmoxConsoleOptions _consoleOpt;
+
+        public ProxmoxClient(HttpClient http, IOptions<ProxmoxOptions> options, IOptions<ProxmoxConsoleOptions> consoleOptions)
         {
             _http = http;
             _opt = options.Value;
+            _consoleOpt = consoleOptions.Value;
 
             if (!_http.DefaultRequestHeaders.Contains("Authorization"))
             {
                 _http.DefaultRequestHeaders.Add("Authorization", $"PVEAPIToken {_opt.TokenId}={_opt.TokenSecret}");
             }
+        }
+
+        public async Task<string> GetLoginTicketAsync(CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(_consoleOpt.Username) ||
+                string.IsNullOrWhiteSpace(_consoleOpt.Password))
+            {
+                throw new InvalidOperationException("Proxmox console credentials are not configured.");
+            }
+
+            string baseUrl = _opt.BaseUrl.TrimEnd('/');
+            Uri baseUri = new Uri(baseUrl + "/api2/json/");
+
+            HttpClientHandler handler = new HttpClientHandler();
+            if (_opt.DevIgnoreCertErrors)
+            {
+                handler.ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            }
+
+            using HttpClient localHttp = new HttpClient(handler)
+            {
+                BaseAddress = baseUri
+            };
+
+            Dictionary<string, string> form = new Dictionary<string, string>
+            {
+                ["username"] = _consoleOpt.Username,
+                ["password"] = _consoleOpt.Password
+            };
+
+            HttpContent content = new FormUrlEncodedContent(form);
+
+            using HttpResponseMessage resp = await localHttp.PostAsync("access/ticket", content, ct);
+            string responseBody = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Proxmox access/ticket failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {responseBody}");
+            }
+
+            JsonDocument doc = JsonDocument.Parse(responseBody);
+            JsonElement data = doc.RootElement.GetProperty("data");
+
+            string? ticket = data.GetProperty("ticket").GetString();
+            if (string.IsNullOrEmpty(ticket))
+            {
+                throw new InvalidOperationException("Proxmox access/ticket response is missing 'ticket'.");
+            }
+
+            return ticket;
         }
 
         public async Task<VmStatus> GetVmStatusAsync(string node, int vmId, CancellationToken ct = default)

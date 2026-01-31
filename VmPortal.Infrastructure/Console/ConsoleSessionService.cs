@@ -9,13 +9,13 @@ namespace VmPortal.Infrastructure.Console
 {
     internal sealed class ConsoleSessionService : IConsoleSessionService
     {
-        private readonly IProxmoxClient _proxmoxClient;
+        private readonly IProxmoxConsoleClient _consoleClient;
         private readonly IMemoryCache _cache;
         private readonly TimeSpan _sessionLifetime;
 
-        public ConsoleSessionService(IProxmoxClient proxmoxClient, IMemoryCache cache)
+        public ConsoleSessionService(IProxmoxConsoleClient consoleClient, IMemoryCache cache)
         {
-            _proxmoxClient = proxmoxClient;
+            _consoleClient = consoleClient;
             _cache = cache;
             _sessionLifetime = TimeSpan.FromMinutes(5);
         }
@@ -26,7 +26,8 @@ namespace VmPortal.Infrastructure.Console
             string ownerExternalId,
             CancellationToken ct = default)
         {
-            ProxmoxVncProxyInfo proxyInfo = await _proxmoxClient.CreateVncProxyAsync(node, vmId, ct);
+            ProxmoxLoginResult login = await _consoleClient.LoginAsync(ct);
+            ProxmoxVncProxyInfo proxyInfo = await _consoleClient.CreateVncProxyAsync(node, vmId, login, ct);
 
             string sessionId = Guid.NewGuid().ToString("N");
             DateTimeOffset expiresAt = DateTimeOffset.UtcNow.Add(_sessionLifetime);
@@ -38,6 +39,7 @@ namespace VmPortal.Infrastructure.Console
                 VmId = vmId,
                 Port = proxyInfo.Port,
                 Ticket = proxyInfo.Ticket,
+                LoginTicket = login.Ticket,
                 ExpiresAt = expiresAt,
                 OwnerExternalId = ownerExternalId
             };

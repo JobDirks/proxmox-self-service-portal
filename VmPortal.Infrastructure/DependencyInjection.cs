@@ -55,6 +55,15 @@ namespace VmPortal.Infrastructure
 
             services.AddScoped<IConsoleSessionService, ConsoleSessionService>();
 
+
+            // Console options
+            services.Configure<ProxmoxConsoleOptions>(configuration.GetSection("ProxmoxConsole"));
+
+            // Console client (login-based)
+            services.AddScoped<IProxmoxConsoleClient, ProxmoxConsoleClient>();
+
+
+
             // Proxmox client configuration
             services.Configure<ProxmoxOptions>(configuration.GetSection("Proxmox"));
 
