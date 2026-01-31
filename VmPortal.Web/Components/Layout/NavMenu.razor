@@ -12,36 +12,34 @@
     <nav class="nav flex-column">
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span>
+                Home
             </NavLink>
-        </div>
-
-        <div class="nav-item px-3 mt-2">
-            <span class="text-muted small">My VMs</span>
         </div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="/my-vms">
-                <span class="bi bi-list-nav-menu" aria-hidden="true"></span> My VMs
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span>
+                My VMs
             </NavLink>
         </div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="/my-vms/new">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> New VM
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span>
+                New VM
             </NavLink>
         </div>
 
         <AuthorizeView Roles="Admin">
-            <div class="nav-item px-3 mt-3">
-                <span class="text-muted small">Admin</span>
-            </div>
             <div class="nav-item px-3">
                 <NavLink class="nav-link" href="/admin/vms">
-                    <span class="bi bi-server-nav-menu" aria-hidden="true"></span> VM Administration
+                    <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span>
+                    VM Administration
                 </NavLink>
             </div>
             <div class="nav-item px-3">
                 <NavLink class="nav-link" href="/admin/templates">
-                    <span class="bi bi-card-list-nav-menu" aria-hidden="true"></span> VM Templates
+                    <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span>
+                    VM Templates
                 </NavLink>
             </div>
         </AuthorizeView>
