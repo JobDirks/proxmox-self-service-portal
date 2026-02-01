@@ -58,3 +58,173 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+/* --- Analytics: light/day theme ---------------------------------------- */
+
+.analytics-page {
+    background: transparent;
+    padding: 0 0 1.5rem;
+    border-radius: 0;
+}
+
+/* Hero header: subtle light gradient with a thin accent border */
+.analytics-hero {
+    background: linear-gradient(135deg, #e8f3ff, #f5f0ff);
+    border-radius: 0.75rem;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+/* Metric cards: clean white cards with soft shadows */
+.analytics-card {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+    .analytics-card:hover {
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.1);
+        transform: translateY(-1px);
+        transition: all 0.15s ease-out;
+    }
+
+/* Small label above the big number */
+.analytics-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280; /* neutral-500 */
+    margin-bottom: 0.35rem;
+}
+
+/* Big primary KPI value */
+.analytics-value {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: #111827; /* neutral-900 */
+}
+
+.analytics-subtext {
+    margin-top: 0.25rem;
+    color: #6b7280; /* neutral-500 */
+}
+
+/* Inline progress bar under KPIs */
+.analytics-bar {
+    margin-top: 0.75rem;
+    height: 4px;
+    background-color: #e5e7eb; /* neutral-200 */
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.analytics-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+}
+
+/* Panels with charts and tables */
+.analytics-panel {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+/* Panel header with a light accent strip */
+.analytics-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.08), rgba(129, 140, 248, 0.12));
+    border-bottom: 1px solid rgba(148, 163, 184, 0.4);
+    color: #111827;
+}
+
+    .analytics-panel-header span:first-child {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+
+/* Chart size */
+.chart-container {
+    position: relative;
+    height: 260px;
+    width: 100%;
+}
+
+/* Loading text */
+.analytics-loading {
+    color: #4b5563; /* neutral-600 */
+}
+
+/* Table hover */
+.analytics-table tbody tr:hover {
+    background-color: rgba(37, 99, 235, 0.06); /* light blue highlight */
+}
+
+/* Colored dot used in legends */
+.legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 0.35rem;
+}
+
+.analytics-chart-main {
+    padding-top: 0.25rem;
+}
+
+/* side info column next to the VM status chart */
+.analytics-panel-side {
+    flex-grow: 0;
+    min-width: 190px;
+    padding-left: 1rem;
+    margin-left: 0.5rem;
+    border-left: 1px solid #e5e7eb; /* light grey separator */
+}
+
+@media (max-width: 767.98px) {
+    .analytics-panel-side {
+        border-left: none;
+        border-top: 1px solid #e5e7eb;
+        margin-left: 0;
+        margin-top: 1rem;
+        padding-left: 0;
+        padding-top: 1rem;
+    }
+}
+
+.analytics-panel-footer {
+    background-color: #f9fafb;
+    border-top: 1px solid #e5e7eb;
+}
+
+/* Round the bottom of panel footers to match the card */
+.analytics-panel .card-footer {
+    border-radius: 0 0 0.75rem 0.75rem;
+}
+
+/* Slightly reduce bottom padding so footer isn't too far away */
+.analytics-panel .card-body {
+    padding-bottom: 1rem;
+}
+
+.analytics-tag-live {
+    background-color: #e0f2fe; /* light blue */
+    color: #0369a1; /* darker blue text */
+    border-radius: 999px;
+    padding: 0.18rem 0.6rem; /* slightly taller than before */
+    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+}
+
+.analytics-tag-placeholder {
+    display: inline-block;
+    min-height: 1.3rem; /* roughly the height of the live badge */
+    min-width: 0.6rem;
+}
