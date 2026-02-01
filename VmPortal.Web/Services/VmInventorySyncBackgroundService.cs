@@ -20,7 +20,7 @@ namespace VmPortal.Web.Services
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
-            _interval = TimeSpan.FromHours(1); // run every hour; you can tweak this
+            _interval = TimeSpan.FromSeconds(60); // run every 60 seconds
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)

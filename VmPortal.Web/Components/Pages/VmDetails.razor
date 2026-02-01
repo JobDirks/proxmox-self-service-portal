@@ -121,6 +121,14 @@ else
                                         @onclick="ResetVm">
                                     <i class="fas fa-bolt me-1"></i> Hard Reset
                                 </button>
+                                @if (_canDelete)
+                                {
+                                    <button class="btn btn-outline-danger btn-sm ms-2"
+                                            disabled="@(_busy || _vm == null || _vm.VmId <= 0 || _vm.IsDisabled)"
+                                            @onclick="DeleteVmAsync">
+                                        <i class="fas fa-trash me-1"></i> Delete
+                                    </button>
+                                }
                             </div>
                             <div class="btn-group mb-2" role="group">
                                 <button class="btn btn-outline-secondary btn-sm"
@@ -1037,7 +1045,7 @@ else
         {
             try
             {
-                using PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+                using PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
 
                 while (await timer.WaitForNextTickAsync(token))
                 {
@@ -1046,13 +1054,11 @@ else
                         break;
                     }
 
-                    // Avoid interfering if another action is in progress
                     await InvokeAsync(async () =>
                     {
                         try
                         {
-                            // Do not refresh status while console is active/opening to avoid
-                            // any possible interference with the console session.
+                            // Do not refresh while console is active/opening
                             if (_consoleOpening || !string.IsNullOrEmpty(_currentConsoleSessionId))
                             {
                                 return;
@@ -1391,6 +1397,61 @@ else
         Db.VmUserPermissions.Remove(perm);
         await Db.SaveChangesAsync();
         await LoadPermissionsAsync();
+    }
+
+    private async Task DeleteVmAsync()
+    {
+        if (_vm == null || _busy || _vm.VmId <= 0)
+        {
+            return;
+        }
+
+        bool confirm = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Are you sure you want to delete VM '{_vm.Name}' (ID {_vm.VmId})? This will disable it and schedule it for deletion.");
+        if (!confirm)
+        {
+            return;
+        }
+
+        _busy = true;
+        ClearMessage();
+        StateHasChanged();
+
+        try
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            _vm.IsDisabled = true;
+            _vm.DisabledAt = now;
+            await Db.SaveChangesAsync();
+
+            await LogSecurityEventAsync(
+                "VmDisableRequestedByUser",
+                $"VM: {Sanitizer.SanitizeForLog(_vm.Name)} ({_vm.VmId}) disabled and scheduled for deletion by user {CurrentUserId}",
+                "Information");
+
+            ShowMessage(
+                "VM has been disabled and scheduled for deletion. It may remain in Proxmox until cleanup runs.",
+                false);
+
+            await Task.Delay(1500);
+            Nav.NavigateTo("/my-vms");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to disable VM {VmId} for user {UserId}", _vm.VmId, CurrentUserId);
+            await LogSecurityEventAsync(
+                "VmDisableFailed",
+                $"VM: {Sanitizer.SanitizeForLog(_vm.Name)} ({_vm.VmId}), Error: {ex.Message}",
+                "Error");
+            ShowMessage("Failed to disable VM. Please try again or contact support.", true);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
     }
 
 }

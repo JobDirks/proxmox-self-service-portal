@@ -651,7 +651,7 @@ else
 
         bool confirm = await JS.InvokeAsync<bool>(
             "confirm",
-            $"Are you sure you want to delete VM '{vm.Name}' (ID {vm.VmId})? This will remove it from Proxmox.");
+            $"Are you sure you want to disable VM '{vm.Name}' (ID {vm.VmId}) and schedule it for deletion?");
         if (!confirm)
         {
             return;
@@ -663,75 +663,30 @@ else
 
         try
         {
-            // Optional: stop VM first if it's running
-            if (vm.Status == VmStatus.Running)
-            {
-                await Proxmox.StopVmAsync(sanitizedNode, vm.VmId, default);
-                await Task.Delay(2000);
-            }
+            DateTimeOffset now = DateTimeOffset.UtcNow;
 
-            bool deletedInProxmox = false;
+            vm.IsDisabled = true;
+            vm.DisabledAt = now;
+            // We do NOT set IsDeleted here; that will be done by the sync service after grace period.
+            await Db.SaveChangesAsync();
 
-            try
-            {
-                await Proxmox.DeleteVmAsync(sanitizedNode, vm.VmId, default);
-                deletedInProxmox = true;
-            }
-            catch (HttpRequestException httpEx)
-            {
-                string message = httpEx.Message ?? string.Empty;
+            await LogSecurityEventAsync(
+                "AdminVmDisableRequested",
+                $"VM: {Sanitizer.SanitizeForLog(vm.Name)} ({vm.VmId}) disabled and scheduled for deletion by admin {CurrentUserId}",
+                "Information");
 
-                // If Proxmox says config does not exist, treat as already deleted
-                if (message.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
-                {
-                    Logger.LogWarning(
-                        httpEx,
-                        "Proxmox reports VM {VmId} on {Node} does not exist when deleting; treating as already deleted.",
-                        vm.VmId,
-                        sanitizedNode);
-
-                    deletedInProxmox = true;
-                }
-                else
-                {
-                    // Real error: rethrow for outer catch
-                    throw;
-                }
-            }
-
-            if (deletedInProxmox)
-            {
-                DateTimeOffset now = DateTimeOffset.UtcNow;
-
-                // Reflect the truth: VM is gone in Proxmox
-                vm.IsDisabled = true;
-                vm.DisabledAt ??= now;
-                vm.IsDeleted = true;
-                vm.DeletedAt = now;
-                vm.LastSyncedAt = now;
-
-                await Db.SaveChangesAsync();
-
-                await LogSecurityEventAsync(
-                    "AdminVmDeleted",
-                    $"VM: {Sanitizer.SanitizeForLog(vm.Name)} ({vm.VmId}) deleted or already missing in Proxmox by admin {CurrentUserId}",
-                    "Information");
-
-                ShowMessage($"Delete completed for {vm.Name}. VM is removed from Proxmox and marked deleted in the portal.", false);
-            }
-            else
-            {
-                ShowMessage($"Delete status for {vm.Name} is unknown. Check logs.", true);
-            }
+            ShowMessage(
+                $"VM '{vm.Name}' has been disabled and scheduled for deletion. It may remain in Proxmox until cleanup runs.",
+                false);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Admin failed to delete VM {VmId}", vm.VmId);
+            Logger.LogError(ex, "Admin failed to disable VM {VmId}", vm.VmId);
             await LogSecurityEventAsync(
-                "AdminVmDeleteFailed",
+                "AdminVmDisableFailed",
                 $"VM: {Sanitizer.SanitizeForLog(vm.Name)} ({vm.VmId}), Error: {ex.Message}",
                 "Error");
-            ShowMessage($"Failed to delete {vm.Name}. Check logs.", true);
+            ShowMessage($"Failed to disable {vm.Name}. Check logs.", true);
         }
         finally
         {

@@ -1,0 +1,266 @@
+@page "/admin/proxmox-vms"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Policy = VmPortal.Domain.Security.SecurityConstants.Policies.Admin)]
+@inherits SecureComponentBase
+@using System
+@using System.Linq
+@using Microsoft.EntityFrameworkCore
+@using VmPortal.Infrastructure.Data
+@using VmPortal.Domain.Vms
+@using VmPortal.Application.Proxmox
+@using VmPortal.Application.Security
+@inject VmPortalDbContext Db
+@inject IProxmoxClient Proxmox
+@inject IInputSanitizer Sanitizer
+@inject Microsoft.Extensions.Options.IOptions<ProxmoxTagOptions> TagOptions
+
+<PageTitle>Proxmox VM Inventory</PageTitle>
+
+<h1 class="h4 mb-3">Proxmox VM Inventory</h1>
+
+@if (_loading)
+{
+    <div class="d-flex justify-content-center py-4">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-2 mb-3">
+            @_error
+        </div>
+    }
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Untracked Proxmox VMs</h5>
+            <span class="text-muted small">@_unmanagedVms.Count VMs not tracked in portal</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Node</th>
+                        <th>VMID</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (ProxmoxVmInfo info in _unmanagedVms)
+                    {
+                        <tr class="@(HasManagedTag(info) ? string.Empty : "table-warning")">
+                            <td>@Sanitizer.SanitizeForDisplay(info.Node)</td>
+                            <td>@info.VmId</td>
+                            <td>@Sanitizer.SanitizeForDisplay(info.Name)</td>
+                            <td>
+                                <span class="badge @GetStatusBadgeClass(info.Status)">
+                                    @info.Status
+                                </span>
+                                @if (!HasManagedTag(info))
+                                {
+                                    <span class="badge bg-warning text-dark ms-1">Unmanaged</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success ms-1">Has managed tag</span>
+                                }
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary"
+                                        disabled="@_busy"
+                                        @onclick="() => ImportVmAsync(info)">
+                                    @if (_busy && _currentImportVmId == info.VmId)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    Import as disabled
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                    @if (_unmanagedVms.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-3">
+                                All Proxmox VMs are tracked in the portal.
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="card-body small text-muted">
+            Imported VMs are added as <strong>disabled</strong> with no owner. You can assign owners and permissions later.
+        </div>
+    </div>
+}
+
+@code {
+    private List<ProxmoxVmInfo> _unmanagedVms = new List<ProxmoxVmInfo>();
+    private bool _loading = true;
+    private bool _busy = false;
+    private int _currentImportVmId;
+    private string? _error;
+    private ProxmoxTagOptions _tagOptions = new ProxmoxTagOptions();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        _tagOptions = TagOptions.Value;
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            // All DB VMs (including disabled/deleted)
+            List<Vm> dbVms = await Db.Vms.ToListAsync();
+
+            HashSet<(string Node, int VmId)> dbIndex = dbVms
+                .Select(v => (v.Node, v.VmId))
+                .ToHashSet();
+
+            IReadOnlyList<ProxmoxVmInfo> proxmoxVms = await Proxmox.ListVmsAsync(default);
+
+            _unmanagedVms = proxmoxVms
+                .Where(info => !dbIndex.Contains((info.Node, info.VmId)))
+                .OrderBy(info => info.Node)
+                .ThenBy(info => info.VmId)
+                .ToList();
+
+            await LogSecurityEventAsync(
+                "AdminProxmoxVmInventoryViewed",
+                $"Admin viewed {_unmanagedVms.Count} unmanaged Proxmox VMs",
+                "Information");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load Proxmox VM inventory");
+            _error = "Failed to load Proxmox VM inventory. Check logs for details.";
+            await LogSecurityEventAsync("AdminProxmoxVmInventoryFailed", ex.Message, "Error");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ImportVmAsync(ProxmoxVmInfo info)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _currentImportVmId = info.VmId;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            // Re-check that we still don't have this VM in DB
+            bool exists = await Db.Vms.AnyAsync(
+                v => v.Node == info.Node && v.VmId == info.VmId);
+
+            if (exists)
+            {
+                _error = $"VM {info.VmId} on {info.Node} is already tracked.";
+                return;
+            }
+
+            // Resolve current admin user so we can set a valid OwnerUserId
+            if (string.IsNullOrEmpty(CurrentUserId))
+            {
+                _error = "Current user identity is not available; cannot import VM.";
+                return;
+            }
+
+            VmPortal.Domain.Users.User? currentUser =
+                await Db.Users.FirstOrDefaultAsync(u => u.ExternalId == CurrentUserId);
+
+            if (currentUser == null)
+            {
+                _error = "No user record found for the current identity; cannot import VM.";
+                return;
+            }
+
+            Vm vm = new Vm
+            {
+                Id = Guid.NewGuid(),
+                VmId = info.VmId,
+                Node = info.Node,
+                Name = info.Name,
+                Status = info.Status,
+                OwnerUserId = currentUser.Id,
+                TemplateId = null,
+                TemplateVmId = null,
+                CpuCores = info.CpuCores,
+                MemoryMiB = info.MemoryMiB,
+                DiskGiB = info.DiskGiB,
+                IsDisabled = true,
+                DisabledAt = DateTimeOffset.UtcNow,
+                LastSyncedAt = DateTimeOffset.UtcNow
+            };
+
+            Db.Vms.Add(vm);
+            await Db.SaveChangesAsync();
+
+            await LogSecurityEventAsync(
+                "AdminProxmoxVmImported",
+                $"Imported Proxmox VM {info.Name} ({info.VmId}) on {info.Node} as disabled VM (owner: {currentUser.Id}).",
+                "Information");
+
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to import Proxmox VM {VmId} on {Node}", info.VmId, info.Node);
+            _error = "Failed to import VM. Check logs for details.";
+            await LogSecurityEventAsync(
+                "AdminProxmoxVmImportFailed",
+                $"VM {info.Name} ({info.VmId}) on {info.Node}: {ex.Message}",
+                "Error");
+        }
+        finally
+        {
+            _busy = false;
+            _currentImportVmId = 0;
+            StateHasChanged();
+        }
+    }
+
+    private bool HasManagedTag(ProxmoxVmInfo info)
+    {
+        if (string.IsNullOrWhiteSpace(_tagOptions.ManagedVmTag))
+        {
+            return false;
+        }
+
+        return info.Tags.Any(t =>
+            string.Equals(t, _tagOptions.ManagedVmTag, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string GetStatusBadgeClass(VmStatus status)
+    {
+        return status switch
+        {
+            VmStatus.Running => "bg-success",
+            VmStatus.Stopped => "bg-secondary",
+            VmStatus.Paused => "bg-warning",
+            _ => "bg-dark"
+        };
+    }
+}

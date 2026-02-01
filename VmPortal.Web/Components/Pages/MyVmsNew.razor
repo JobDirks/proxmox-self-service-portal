@@ -17,6 +17,7 @@
 @inject NavigationManager Nav
 @inject IProxmoxClient Proxmox
 @inject Microsoft.Extensions.Options.IOptions<VmResourceLimitsOptions> VmLimitsOptions
+@inject Microsoft.Extensions.Options.IOptions<ProxmoxTagOptions> ProxmoxTagOptions
 
 <PageTitle>Create VM</PageTitle>
 
@@ -246,6 +247,8 @@ else
     private CreateVmStage _stage = CreateVmStage.None;
     private string? _stageMessage;
 
+    private ProxmoxTagOptions _tagOptions = new ProxmoxTagOptions();
+
     private sealed class CreateVmModel
     {
         public Guid? TemplateId { get; set; }
@@ -259,6 +262,7 @@ else
     {
         await base.OnInitializedAsync();
         _vmLimits = VmLimitsOptions.Value;
+        _tagOptions = ProxmoxTagOptions.Value;
         await LoadDataAsync();
     }
 
@@ -656,6 +660,20 @@ else
 
             int newVmId = cloneResult.VmId;
 
+            try
+            {
+                IEnumerable<string> tags = BuildCloneVmTags(template);
+                await Proxmox.SetVmTagsAsync(template.Node, newVmId, tags, default);
+            }
+            catch (Exception tagEx)
+            {
+                Logger.LogError(tagEx, "Failed to apply tags to cloned VM {VmId} on node {Node}", newVmId, template.Node);
+                await LogSecurityEventAsync(
+                    "VmTaggingFailed",
+                    $"Template: {template.Name} ({template.TemplateVmId}), New VM: {name}, Error: {tagEx.Message}",
+                    "Warning");
+            }
+
             await LogSecurityEventAsync("VmCloneRequested",
                 $"Template: {template.Name} ({template.TemplateVmId}), New VM: {name}, TaskId: {cloneResult.TaskId}, VmId: {newVmId}",
                 "Information");
@@ -773,8 +791,27 @@ else
         }
     }
 
+    private IEnumerable<string> BuildCloneVmTags(VmTemplate template)
+        {
+            List<string> tags = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(_tagOptions.ManagedVmTag))
+            {
+                tags.Add(_tagOptions.ManagedVmTag);
+            }
+
+            if (!string.IsNullOrWhiteSpace(template.TemplateTagName) &&
+                !string.IsNullOrWhiteSpace(_tagOptions.TemplateNameTagPrefix))
+            {
+                string tmplTag = _tagOptions.TemplateNameTagPrefix + template.TemplateTagName;
+                tags.Add(tmplTag);
+            }
+
+            return tags;
+        }
+
     private void Cancel()
-    {
-        Nav.NavigateTo("/my-vms");
-    }
+        {
+            Nav.NavigateTo("/my-vms");
+        }
 }

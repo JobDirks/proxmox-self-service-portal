@@ -61,6 +61,10 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.Configure<VmResourceLimitsOptions>(
     builder.Configuration.GetSection("VmResourceLimits"));
 
+// Proxmox Tag configuration
+builder.Services.Configure<ProxmoxTagOptions>(
+    builder.Configuration.GetSection("Proxmox:Tags"));
+
 // Authentication + Authorization (Entra ID with enhanced security)
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(options =>

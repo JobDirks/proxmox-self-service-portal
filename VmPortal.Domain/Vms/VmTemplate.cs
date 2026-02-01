@@ -9,6 +9,7 @@ namespace VmPortal.Domain.Vms
         public string Name { get; set; } = string.Empty;       // Display name in UI
         public string Node { get; set; } = string.Empty;       // Proxmox node name
         public int TemplateVmId { get; set; }                  // Source template VMID in Proxmox
+        public string? TemplateTagName { get; set; }
 
         public int DefaultCpuCores { get; set; }
         public int DefaultMemoryMiB { get; set; }

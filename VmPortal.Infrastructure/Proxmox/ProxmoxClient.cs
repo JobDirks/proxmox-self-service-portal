@@ -511,6 +511,54 @@ namespace VmPortal.Infrastructure.Proxmox
                     ? (statusElement.GetString() ?? string.Empty)
                     : string.Empty;
 
+                string tagsString = item.TryGetProperty("tags", out JsonElement tagsElement)
+                    ? (tagsElement.GetString() ?? string.Empty)
+                    : string.Empty;
+
+                List<string> tags = new List<string>();
+                if (!string.IsNullOrWhiteSpace(tagsString))
+                {
+                    string[] split = tagsString.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                    foreach (string tag in split)
+                    {
+                        string trimmed = tag.Trim();
+                        if (trimmed.Length > 0)
+                        {
+                            tags.Add(trimmed);
+                        }
+                    }
+                }
+
+                // Resource parsing
+                int cpuCores = 0;
+                if (item.TryGetProperty("maxcpu", out JsonElement maxCpuElement) &&
+                    maxCpuElement.TryGetInt32(out int cpuVal))
+                {
+                    cpuCores = cpuVal;
+                }
+
+                int memoryMiB = 0;
+                if (item.TryGetProperty("maxmem", out JsonElement maxMemElement))
+                {
+                    long memBytes;
+                    if (maxMemElement.ValueKind == JsonValueKind.Number &&
+                        maxMemElement.TryGetInt64(out memBytes))
+                    {
+                        memoryMiB = (int)(memBytes / (1024L * 1024L));
+                    }
+                }
+
+                int diskGiB = 0;
+                if (item.TryGetProperty("maxdisk", out JsonElement maxDiskElement))
+                {
+                    long diskBytes;
+                    if (maxDiskElement.ValueKind == JsonValueKind.Number &&
+                        maxDiskElement.TryGetInt64(out diskBytes))
+                    {
+                        diskGiB = (int)(diskBytes / (1024L * 1024L * 1024L));
+                    }
+                }
+
                 VmStatus status = statusString switch
                 {
                     "running" => VmStatus.Running,
@@ -524,13 +572,94 @@ namespace VmPortal.Infrastructure.Proxmox
                     Node = node,
                     VmId = vmId,
                     Name = name,
-                    Status = status
+                    Status = status,
+                    Tags = tags,
+                    CpuCores = cpuCores,
+                    MemoryMiB = memoryMiB,
+                    DiskGiB = diskGiB
                 };
 
                 result.Add(info);
             }
 
             return result;
+        }
+
+        public async Task SetVmTagsAsync(string node, int vmId, IEnumerable<string> tags, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            if (vmId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(vmId), "VMID must be positive.");
+            }
+
+            // First, get existing tags from VM config
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/config";
+            using HttpResponseMessage getResp = await _http.GetAsync(url, ct);
+            getResp.EnsureSuccessStatusCode();
+
+            JsonDocument? doc = await getResp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct);
+            HashSet<string> mergedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (doc != null)
+            {
+                JsonElement root = doc.RootElement;
+                if (root.TryGetProperty("data", out JsonElement dataElement))
+                {
+                    if (dataElement.TryGetProperty("tags", out JsonElement tagsElement))
+                    {
+                        string? existingTagString = tagsElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(existingTagString))
+                        {
+                            string[] existingTags = existingTagString.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                            foreach (string tag in existingTags)
+                            {
+                                string trimmed = tag.Trim();
+                                if (trimmed.Length > 0)
+                                {
+                                    mergedTags.Add(trimmed);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add new tags
+            foreach (string t in tags)
+            {
+                if (!string.IsNullOrWhiteSpace(t))
+                {
+                    string trimmed = t.Trim();
+                    if (trimmed.Length > 0)
+                    {
+                        mergedTags.Add(trimmed);
+                    }
+                }
+            }
+
+            string tagsValue = string.Join(";", mergedTags);
+
+            Dictionary<string, string> form = new Dictionary<string, string>
+            {
+                ["tags"] = tagsValue
+            };
+
+            HttpContent content = new FormUrlEncodedContent(form);
+            string postUrl = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/config";
+
+            using HttpResponseMessage resp = await _http.PostAsync(postUrl, content, ct);
+            string responseBody = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Proxmox SetVmTags failed: {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {responseBody}");
+            }
         }
 
         public async Task DeleteVmAsync(string node, int vmId, CancellationToken ct = default)

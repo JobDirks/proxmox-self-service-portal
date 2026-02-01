@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using VmPortal.Domain.Vms;
+using System.Collections.Generic;
 
 namespace VmPortal.Application.Proxmox
 {
@@ -50,5 +51,6 @@ namespace VmPortal.Application.Proxmox
         Task<IReadOnlyList<ProxmoxVmInfo>> ListVmsAsync(CancellationToken ct = default);
 
         public Task DeleteVmAsync(string node, int vmId, CancellationToken ct = default);
+        public Task SetVmTagsAsync(string node, int vmId, IEnumerable<string> tags, CancellationToken ct = default);
     }
 }

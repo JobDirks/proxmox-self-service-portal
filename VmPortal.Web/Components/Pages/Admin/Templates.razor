@@ -10,6 +10,10 @@
 @inject VmPortalDbContext Db
 @inject IInputSanitizer Sanitizer
 @using System.Linq
+@using VmPortal.Application.Proxmox
+@inject Microsoft.Extensions.Options.IOptions<ProxmoxTagOptions> TagOptions
+
+@inject IProxmoxClient Proxmox
 
 <PageTitle>VM Templates</PageTitle>
 
@@ -41,6 +45,7 @@ else
                                 <th>Template VMID</th>
                                 <th>Defaults</th>
                                 <th>Limits</th>
+                                <th>Template Tag</th>
                                 <th>Active</th>
                                 <th>Manage</th>
                             </tr>
@@ -69,6 +74,13 @@ else
                                         </small>
                                     </td>
                                     <td>
+                                        <small>
+                                            @(string.IsNullOrWhiteSpace(template.TemplateTagName)
+                                                                                ? "—"
+                                                                                : template.TemplateTagName)
+                                        </small>
+                                    </td>
+                                    <td>
                                         @if (template.IsActive)
                                         {
                                             <span class="badge bg-success">Active</span>
@@ -90,7 +102,7 @@ else
                             @if (_templates.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="7" class="text-center text-muted py-3">
+                                    <td colspan="8" class="text-center text-muted py-3">
                                         No templates defined yet.
                                     </td>
                                 </tr>
@@ -207,6 +219,17 @@ else
                     </div>
 
                     <div class="mb-3">
+                        <label class="form-label">Template Tag (optional)</label>
+                        <input class="form-control"
+                               @bind="_templateTagName"
+                               @bind:event="oninput" />
+                        <div class="form-text small">
+                            Proxmox tag to apply to VMs cloned from this template (e.g. <code>sitecore</code>, <code>ubuntu-24</code>).
+                            Only letters, numbers, and <code>_+.-:</code>, no spaces.
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
                         <label class="form-label">Description</label>
                         <textarea class="form-control"
                                   rows="3"
@@ -243,6 +266,8 @@ else
     private string? _validationError;
 
     private Guid? _editingTemplateId;
+    private string? _templateTagName;
+    private ProxmoxTagOptions _tagOptions = new ProxmoxTagOptions();
 
     private string _name = string.Empty;
     private string _node = string.Empty;
@@ -261,6 +286,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         await base.OnInitializedAsync();
+        _tagOptions = TagOptions.Value;
         await LoadTemplatesAsync();
     }
 
@@ -440,10 +466,23 @@ else
                 existing.MaxCpuCores = _maxCpu;
                 existing.MaxMemoryMiB = _maxMemoryMiB;
                 existing.MaxDiskGiB = _maxDiskGiB;
+                existing.TemplateTagName = _templateTagName;
                 existing.Description = _description;
                 existing.IsActive = _isActive;
 
                 await Db.SaveChangesAsync();
+
+                try
+                {
+                    IEnumerable<string> tags = BuildTemplateVmTags(existing);
+                    await Proxmox.SetVmTagsAsync(existing.Node, existing.TemplateVmId, tags, default);
+                }
+                catch (Exception tagEx)
+                {
+                    Logger.LogError(tagEx, "Failed to apply tags to template VM {VmId} on node {Node}",
+                        existing.TemplateVmId,
+                        existing.Node);
+                }
 
                 await LogSecurityEventAsync("AdminTemplateUpdated",
                     $"Template: {existing.Name} ({existing.TemplateVmId})", "Information");
@@ -465,6 +504,7 @@ else
                     MaxCpuCores = _maxCpu,
                     MaxMemoryMiB = _maxMemoryMiB,
                     MaxDiskGiB = _maxDiskGiB,
+                    TemplateTagName = _templateTagName,
                     Description = _description,
                     IsActive = _isActive,
                     CreatedAt = DateTimeOffset.UtcNow
@@ -472,6 +512,18 @@ else
 
                 Db.VmTemplates.Add(template);
                 await Db.SaveChangesAsync();
+
+                try
+                {
+                    IEnumerable<string> tags = BuildTemplateVmTags(template);
+                    await Proxmox.SetVmTagsAsync(template.Node, template.TemplateVmId, tags, default);
+                }
+                catch (Exception tagEx)
+                {
+                    Logger.LogError(tagEx, "Failed to apply tags to template VM {VmId} on node {Node}",
+                        template.TemplateVmId,
+                        template.Node);
+                }
 
                 await LogSecurityEventAsync("AdminTemplateCreated",
                     $"Template: {template.Name} ({template.TemplateVmId})", "Information");
@@ -514,5 +566,28 @@ else
             "Information");
     }
 
+    private IEnumerable<string> BuildTemplateVmTags(VmTemplate template)
+    {
+        List<string> tags = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(_tagOptions.ManagedVmTag))
+        {
+            tags.Add(_tagOptions.ManagedVmTag);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_tagOptions.TemplateTag))
+        {
+            tags.Add(_tagOptions.TemplateTag);
+        }
+
+        if (!string.IsNullOrWhiteSpace(template.TemplateTagName) &&
+            !string.IsNullOrWhiteSpace(_tagOptions.TemplateNameTagPrefix))
+        {
+            string tmplTag = _tagOptions.TemplateNameTagPrefix + template.TemplateTagName;
+            tags.Add(tmplTag);
+        }
+
+        return tags;
+    }
     
 }
