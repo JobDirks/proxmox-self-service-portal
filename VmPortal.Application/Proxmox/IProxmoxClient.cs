@@ -46,5 +46,9 @@ namespace VmPortal.Application.Proxmox
             CancellationToken ct = default);
 
         public Task<string> GetLoginTicketAsync(CancellationToken ct = default);
+
+        Task<IReadOnlyList<ProxmoxVmInfo>> ListVmsAsync(CancellationToken ct = default);
+
+        public Task DeleteVmAsync(string node, int vmId, CancellationToken ct = default);
     }
 }

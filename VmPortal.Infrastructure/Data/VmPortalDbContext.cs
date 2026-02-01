@@ -19,6 +19,7 @@ namespace VmPortal.Infrastructure.Data
         public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
         public DbSet<VmTemplate> VmTemplates => Set<VmTemplate>();
+        public DbSet<VmUserPermission> VmUserPermissions { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

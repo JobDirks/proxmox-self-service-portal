@@ -14,6 +14,7 @@
 @inject IProxmoxClient Proxmox
 @inject IRateLimitingService RateLimit
 @inject IInputSanitizer Sanitizer
+@inject IJSRuntime JS
 
 <PageTitle>VM Administration</PageTitle>
 
@@ -99,6 +100,17 @@ else
                            placeholder="Search by VM or owner..."
                            @bind="_searchText"
                            @bind:event="oninput" />
+
+                    <div class="form-check form-check-inline small ms-2">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               id="showDeletedVms"
+                               checked="@_showDeleted"
+                               @onchange="OnShowDeletedChanged" />
+                        <label class="form-check-label" for="showDeletedVms">
+                            Show deleted
+                        </label>
+                    </div>
                 </div>
             </div>
             <div class="table-responsive">
@@ -164,6 +176,16 @@ else
                                         }
                                         @vm.Status
                                     </span>
+
+                                    @if (vm.IsDisabled)
+                                    {
+                                        <span class="badge bg-warning ms-1">Disabled</span>
+                                    }
+
+                                    @if (vm.IsDeleted)
+                                    {
+                                        <span class="badge bg-danger ms-1">Deleted</span>
+                                    }
                                 </td>
                                 <td>
                                     <small>
@@ -193,6 +215,12 @@ else
                                        title="View details">
                                         <i class="fas fa-info-circle me-1"></i> Details
                                     </a>
+
+                                    <button class="btn btn-sm btn-outline-danger ms-1"
+                                            disabled="@(_operationInProgress || _rateLimitCooldown.HasValue || vm.VmId <= 0)"
+                                            @onclick="() => DeleteVmAsync(vm)">
+                                        <i class="fas fa-trash me-1"></i> Delete
+                                    </button>
                                 </td>
                             </tr>
                         }
@@ -242,6 +270,8 @@ else
     private AdminVmSortColumn _sortColumn = AdminVmSortColumn.Name;
     private bool _sortDescending = false;
 
+    private bool _showDeleted = false;
+
     protected override async Task OnInitializedAsync()
     {
         await base.OnInitializedAsync();
@@ -253,12 +283,19 @@ else
     {
         try
         {
-            _vms = await Db.Vms.OrderBy(v => v.Name).ToListAsync();
+            _vms = await Db.Vms
+                .Where(v => _showDeleted || !v.IsDeleted)
+                .OrderBy(v => v.Name)
+                .ToListAsync();
+
             List<Guid> ownerIds = _vms.Select(v => v.OwnerUserId).Distinct().ToList();
             List<User> users = await Db.Users.Where(u => ownerIds.Contains(u.Id)).ToListAsync();
             _owners = users.ToDictionary(u => u.Id, u => u);
 
-            await LogSecurityEventAsync("AdminVmListViewed", $"Admin viewed {_vms.Count} VMs", "Information");
+            await LogSecurityEventAsync(
+                "AdminVmListViewed",
+                $"Admin viewed {_vms.Count} VMs (showDeleted={_showDeleted})",
+                "Information");
         }
         catch (Exception ex)
         {
@@ -287,12 +324,20 @@ else
             return false;
         }
 
-        bool allowed = await RateLimit.CheckRateLimitAsync(CurrentUserId, "admin_operations", 10, TimeSpan.FromMinutes(5));
+        // Admins: 25 operations per 5-minute window
+        bool allowed = await RateLimit.CheckRateLimitAsync(
+            CurrentUserId,
+            "admin_operations",
+            25,
+            TimeSpan.FromMinutes(5));
+
         if (!allowed)
         {
             _rateLimitCooldown = await RateLimit.GetRemainingCooldownAsync(CurrentUserId, "admin_operations");
             await LogSecurityEventAsync("AdminRateLimitExceeded", $"Operation: {operation}", "Warning");
-            ShowMessage($"Rate limit exceeded. Please wait {_rateLimitCooldown?.Minutes ?? 0} minutes before trying again.", true);
+            ShowMessage(
+                $"Rate limit exceeded. Please wait {_rateLimitCooldown?.Minutes ?? 0} minutes before trying again.",
+                true);
             return false;
         }
 
@@ -583,5 +628,133 @@ else
     {
         _message = null;
         StateHasChanged();
+    }
+
+    private async Task DeleteVmAsync(Vm vm)
+    {
+        if (!await CheckOperationRateLimitAsync("delete"))
+        {
+            return;
+        }
+
+        if (_operationInProgress || vm.VmId <= 0)
+        {
+            return;
+        }
+
+        string sanitizedNode = Sanitizer.SanitizeNodeName(vm.Node);
+        if (string.IsNullOrEmpty(sanitizedNode))
+        {
+            ShowMessage("Invalid node name.", true);
+            return;
+        }
+
+        bool confirm = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Are you sure you want to delete VM '{vm.Name}' (ID {vm.VmId})? This will remove it from Proxmox.");
+        if (!confirm)
+        {
+            return;
+        }
+
+        _operationInProgress = true;
+        _currentVm = vm;
+        StateHasChanged();
+
+        try
+        {
+            // Optional: stop VM first if it's running
+            if (vm.Status == VmStatus.Running)
+            {
+                await Proxmox.StopVmAsync(sanitizedNode, vm.VmId, default);
+                await Task.Delay(2000);
+            }
+
+            bool deletedInProxmox = false;
+
+            try
+            {
+                await Proxmox.DeleteVmAsync(sanitizedNode, vm.VmId, default);
+                deletedInProxmox = true;
+            }
+            catch (HttpRequestException httpEx)
+            {
+                string message = httpEx.Message ?? string.Empty;
+
+                // If Proxmox says config does not exist, treat as already deleted
+                if (message.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.LogWarning(
+                        httpEx,
+                        "Proxmox reports VM {VmId} on {Node} does not exist when deleting; treating as already deleted.",
+                        vm.VmId,
+                        sanitizedNode);
+
+                    deletedInProxmox = true;
+                }
+                else
+                {
+                    // Real error: rethrow for outer catch
+                    throw;
+                }
+            }
+
+            if (deletedInProxmox)
+            {
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+
+                // Reflect the truth: VM is gone in Proxmox
+                vm.IsDisabled = true;
+                vm.DisabledAt ??= now;
+                vm.IsDeleted = true;
+                vm.DeletedAt = now;
+                vm.LastSyncedAt = now;
+
+                await Db.SaveChangesAsync();
+
+                await LogSecurityEventAsync(
+                    "AdminVmDeleted",
+                    $"VM: {Sanitizer.SanitizeForLog(vm.Name)} ({vm.VmId}) deleted or already missing in Proxmox by admin {CurrentUserId}",
+                    "Information");
+
+                ShowMessage($"Delete completed for {vm.Name}. VM is removed from Proxmox and marked deleted in the portal.", false);
+            }
+            else
+            {
+                ShowMessage($"Delete status for {vm.Name} is unknown. Check logs.", true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Admin failed to delete VM {VmId}", vm.VmId);
+            await LogSecurityEventAsync(
+                "AdminVmDeleteFailed",
+                $"VM: {Sanitizer.SanitizeForLog(vm.Name)} ({vm.VmId}), Error: {ex.Message}",
+                "Error");
+            ShowMessage($"Failed to delete {vm.Name}. Check logs.", true);
+        }
+        finally
+        {
+            _operationInProgress = false;
+            _currentVm = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnShowDeletedChanged(ChangeEventArgs e)
+    {
+        bool newValue = false;
+
+        if (e.Value is bool b)
+        {
+            newValue = b;
+        }
+        else if (e.Value is string s && bool.TryParse(s, out bool parsed))
+        {
+            newValue = parsed;
+        }
+
+        _showDeleted = newValue;
+        await LoadVmsAsync();
     }
 }

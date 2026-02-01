@@ -18,6 +18,8 @@ using VmPortal.Infrastructure.Security;
 using VmPortal.Infrastructure.Security.Handlers;
 using VmPortal.Application.Console;
 using VmPortal.Infrastructure.Console;
+using VmPortal.Application.Vms;
+using VmPortal.Infrastructure.Vms;
 
 namespace VmPortal.Infrastructure
 {
@@ -62,7 +64,8 @@ namespace VmPortal.Infrastructure
             // Console client (login-based)
             services.AddScoped<IProxmoxConsoleClient, ProxmoxConsoleClient>();
 
-
+            // VM inventory sync service
+            services.AddScoped<IVmInventorySyncService, VmInventorySyncService>();
 
             // Proxmox client configuration
             services.Configure<ProxmoxOptions>(configuration.GetSection("Proxmox"));

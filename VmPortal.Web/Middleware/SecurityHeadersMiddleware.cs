@@ -38,24 +38,12 @@ namespace VmPortal.Web.Middleware
                 context.Response.Headers["X-Frame-Options"] = "DENY";
             }
 
-            context.Response.Headers["Content-Security-Policy"] = csp;
-
-            // Strict Transport Security
-            context.Response.Headers["Strict-Transport-Security"] =
-                "max-age=31536000; includeSubDomains";
-
-            // Content type protection
-            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-
-            // XSS protection
-            context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
-
-            // Referrer policy
+            context.Response.Headers.ContentSecurityPolicy = csp;
+            context.Response.Headers.StrictTransportSecurity = "max-age=31536000; includeSubDomains";
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            context.Response.Headers.XXSSProtection = "1; mode=block";
             context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-
-            // Permissions policy
-            context.Response.Headers["Permissions-Policy"] =
-                "camera=(), microphone=(), geolocation=()";
+            context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
 
             await _next(context);
         }

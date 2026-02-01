@@ -22,6 +22,8 @@ using VmPortal.Web.Components;
 using VmPortal.Web.Extensions;
 using VmPortal.Web.Middleware;
 using VmPortal.Web.WebSockets;
+using VmPortal.Web.Services;
+using Microsoft.AspNetCore.Components.Authorization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -43,11 +45,17 @@ builder.Services.AddSession(options =>
 // Infrastructure (DbContext, Proxmox, Security services)
 builder.Services.AddInfrastructure(builder.Configuration);
 
+// VM Inventory Sync Service + Background Service
+builder.Services.AddHostedService<VmInventorySyncBackgroundService>();
+
 // HTTP Context Accessor for authorization handlers
 builder.Services.AddHttpContextAccessor();
 
 // HttpClient
 builder.Services.AddHttpClient();
+
+// Blazor Authentication State Provider
+builder.Services.AddCascadingAuthenticationState();
 
 // VM Resource Limits configuration
 builder.Services.Configure<VmResourceLimitsOptions>(

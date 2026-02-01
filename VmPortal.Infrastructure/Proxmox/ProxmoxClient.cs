@@ -453,5 +453,101 @@ namespace VmPortal.Infrastructure.Proxmox
 
             return info;
         }
+
+        public async Task<IReadOnlyList<ProxmoxVmInfo>> ListVmsAsync(CancellationToken ct = default)
+        {
+            // Use /cluster/resources?type=vm to get all VMs (qemu + lxc); we filter to qemu
+            const string url = "cluster/resources?type=vm";
+
+            using HttpResponseMessage resp = await _http.GetAsync(url, ct);
+            resp.EnsureSuccessStatusCode();
+
+            JsonDocument? doc = await resp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct);
+            if (doc == null)
+            {
+                throw new InvalidOperationException("Failed to parse Proxmox cluster/resources response.");
+            }
+
+            JsonElement root = doc.RootElement;
+            if (!root.TryGetProperty("data", out JsonElement dataArray) || dataArray.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("Proxmox cluster/resources response is missing 'data' array.");
+            }
+
+            List<ProxmoxVmInfo> result = new List<ProxmoxVmInfo>();
+
+            foreach (JsonElement item in dataArray.EnumerateArray())
+            {
+                // Only qemu VMs for now
+                string? type = item.TryGetProperty("type", out JsonElement typeElement)
+                    ? typeElement.GetString()
+                    : null;
+
+                if (!string.Equals(type, "qemu", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string? node = item.TryGetProperty("node", out JsonElement nodeElement)
+                    ? nodeElement.GetString()
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(node))
+                {
+                    continue;
+                }
+
+                int vmId;
+                if (!item.TryGetProperty("vmid", out JsonElement vmidElement) || !vmidElement.TryGetInt32(out vmId))
+                {
+                    continue;
+                }
+
+                string name = item.TryGetProperty("name", out JsonElement nameElement)
+                    ? (nameElement.GetString() ?? string.Empty)
+                    : string.Empty;
+
+                string statusString = item.TryGetProperty("status", out JsonElement statusElement)
+                    ? (statusElement.GetString() ?? string.Empty)
+                    : string.Empty;
+
+                VmStatus status = statusString switch
+                {
+                    "running" => VmStatus.Running,
+                    "stopped" => VmStatus.Stopped,
+                    "paused" => VmStatus.Paused,
+                    _ => VmStatus.Unknown
+                };
+
+                ProxmoxVmInfo info = new ProxmoxVmInfo
+                {
+                    Node = node,
+                    VmId = vmId,
+                    Name = name,
+                    Status = status
+                };
+
+                result.Add(info);
+            }
+
+            return result;
+        }
+
+        public async Task DeleteVmAsync(string node, int vmId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(node))
+            {
+                throw new ArgumentException("Node is required.", nameof(node));
+            }
+
+            if (vmId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(vmId), "VMID must be positive.");
+            }
+
+            string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}";
+            using HttpResponseMessage resp = await _http.DeleteAsync(url, ct);
+            resp.EnsureSuccessStatusCode();
+        }
     }
 }

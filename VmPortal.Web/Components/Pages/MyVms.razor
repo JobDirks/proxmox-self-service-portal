@@ -157,12 +157,24 @@ else
             }
 
             _currentUserDbId = user.Id;
+
+            // All VM IDs this user has explicit permissions on
+            List<Guid> permittedVmIds = await Db.VmUserPermissions
+                .Where(p => p.UserId == _currentUserDbId)
+                .Select(p => p.VmId)
+                .ToListAsync();
+
             _vms = await Db.Vms
-                .Where(v => v.OwnerUserId == _currentUserDbId)
+                .Where(v =>
+                    !v.IsDeleted &&  // don’t show logically deleted VMs
+                    (v.OwnerUserId == _currentUserDbId || permittedVmIds.Contains(v.Id)))
                 .OrderBy(v => v.Name)
                 .ToListAsync();
 
-            await LogSecurityEventAsync("VmListViewed", $"User viewed {_vms.Count} VMs", "Information");
+            await LogSecurityEventAsync(
+                "VmListViewed",
+                $"User viewed {_vms.Count} VMs (owned or shared)",
+                "Information");
         }
         catch (Exception ex)
         {
@@ -174,6 +186,7 @@ else
             _loading = false;
         }
     }
+
 
     private async Task CheckRateLimitAsync()
     {

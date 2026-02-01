@@ -20,6 +20,7 @@
 @using VmPortal.Application.Console
 @inject IConsoleSessionService ConsoleSessionService
 @implements IAsyncDisposable
+@using Microsoft.AspNetCore.Components.Authorization
 
 <PageTitle>VM Details</PageTitle>
 
@@ -66,6 +67,13 @@ else
         </div>
     }
 
+    @if (_vm != null && _vm.IsDisabled)
+    {
+        <div class="alert alert-warning small">
+            This VM has been disabled by the system (or delete request). Actions may be limited.
+        </div>
+    }
+
     <div class="row">
         <div class="col-lg-6 mb-3">
             <div class="card h-100">
@@ -80,17 +88,17 @@ else
                     <div class="mb-3">
                         <div class="btn-group me-2 mb-2" role="group">
                             <button class="btn btn-success btn-sm"
-                                    disabled="@(!_canStart || _busy || _vm.VmId <= 0)"
+                                    disabled="@(!_canStart || _busy || _vm!.VmId <= 0)"
                                     @onclick="StartVm">
                                 <i class="fas fa-play me-1"></i> Start
                             </button>
                             <button class="btn btn-warning btn-sm"
-                                    disabled="@(!_canShutdown || _busy || _vm.VmId <= 0)"
+                                    disabled="@(!_canShutdown || _busy || _vm!.VmId <= 0)"
                                     @onclick="ShutdownVm">
                                 <i class="fas fa-power-off me-1"></i> Shutdown
                             </button>
                             <button class="btn btn-primary btn-sm"
-                                    disabled="@(!_canRestart || _busy || _vm.VmId <= 0)"
+                                    disabled="@(!_canRestart || _busy || _vm!.VmId <= 0)"
                                     @onclick="RestartVm">
                                 <i class="fas fa-redo me-1"></i> Restart
                             </button>
@@ -104,24 +112,24 @@ else
                         <div class="mt-2">
                             <div class="btn-group me-2 mb-2" role="group">
                                 <button class="btn btn-outline-danger btn-sm"
-                                        disabled="@(!_canHardStop || _busy || _vm.VmId <= 0)"
+                                        disabled="@(!_canHardStop || _busy || _vm!.VmId <= 0)"
                                         @onclick="HardStopVm">
                                     <i class="fas fa-stop me-1"></i> Hard Stop
                                 </button>
                                 <button class="btn btn-outline-danger btn-sm"
-                                        disabled="@(!_canReset || _busy || _vm.VmId <= 0)"
+                                        disabled="@(!_canReset || _busy || _vm!.VmId <= 0)"
                                         @onclick="ResetVm">
                                     <i class="fas fa-bolt me-1"></i> Hard Reset
                                 </button>
                             </div>
                             <div class="btn-group mb-2" role="group">
                                 <button class="btn btn-outline-secondary btn-sm"
-                                        disabled="@(!_canPause || _busy || _vm.VmId <= 0)"
+                                        disabled="@(!_canPause || _busy || _vm!.VmId <= 0)"
                                         @onclick="PauseVm">
                                     <i class="fas fa-pause me-1"></i> Pause
                                 </button>
                                 <button class="btn btn-outline-secondary btn-sm"
-                                        disabled="@(!_canResume || _busy || _vm.VmId <= 0)"
+                                        disabled="@(!_canResume || _busy || _vm!.VmId <= 0)"
                                         @onclick="ResumeVm">
                                     <i class="fas fa-play-circle me-1"></i> Resume
                                 </button>
@@ -295,7 +303,7 @@ else
                 <DataAnnotationsValidator />
                 <ValidationSummary />
 
-                <fieldset disabled="@_busy">
+                <fieldset disabled="@(_busy || !_canManageResources)">
                     @if (_vm != null && _vm.Status == VmStatus.Running)
                     {
                         <div class="alert alert-warning py-1 small">
@@ -369,6 +377,89 @@ else
         </div>
     </div>
 
+    <AuthorizeView Roles="Admin">
+        <div class="card mb-3">
+            <div class="card-header">
+                Access & Permissions
+            </div>
+            <div class="card-body">
+                @if (_vm != null)
+                {
+                    <p class="small mb-1">
+                        Primary owner:
+                        <strong>@(_primaryOwnerName ?? "Unknown")</strong>
+                    </p>
+
+                    <h6 class="small mt-3">Additional users</h6>
+                    <ul class="list-unstyled small mb-2">
+                        @foreach (VmPermissionDisplay perm in _vmPermissions)
+                        {
+                            <li class="mb-1">
+                                <strong>@perm.UserDisplayName</strong>
+                                @if (!string.IsNullOrEmpty(perm.UserEmail))
+                                {
+                                    <span class="text-muted">(@perm.UserEmail)</span>
+                                }
+                                <div class="form-check form-check-inline ms-2">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           checked="@perm.CanDelete"
+                                           @onchange="@(_ => ToggleDeletePermissionAsync(perm.PermissionId))" />
+                                    <label class="form-check-label small">Can delete</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           checked="@perm.CanManageResources"
+                                           @onchange="@(_ => ToggleManagePermissionAsync(perm.PermissionId))" />
+                                    <label class="form-check-label small">Can manage resources</label>
+                                </div>
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-danger ms-2"
+                                        @onclick="() => RemovePermissionAsync(perm.PermissionId)">
+                                    Remove
+                                </button>
+                            </li>
+                        }
+                        @if (_vmPermissions.Count == 0)
+                        {
+                            <li class="text-muted">No additional users.</li>
+                        }
+                    </ul>
+
+                    <hr />
+
+                    <h6 class="small">Add user</h6>
+                    @if (!string.IsNullOrEmpty(_permissionError))
+                    {
+                        <div class="alert alert-warning py-1 small mb-2">
+                            @_permissionError
+                        </div>
+                    }
+                    <div class="input-group input-group-sm mb-2">
+                        <input class="form-control"
+                               placeholder="User email or display name"
+                               @bind="_newPermissionUserInput"
+                               @bind:event="oninput" />
+                        <button class="btn btn-outline-primary"
+                                type="button"
+                                disabled="@_permissionsBusy"
+                                @onclick="AddPermissionAsync">
+                            @if (_permissionsBusy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            Add
+                        </button>
+                    </div>
+                    <p class="text-muted small mb-0">
+                        Only Admins can manage VM access. Owners always have full permissions.
+                    </p>
+                }
+            </div>
+        </div>
+    </AuthorizeView>
+
     <div class="d-flex justify-content-between mt-3">
         <button class="btn btn-secondary" @onclick="BackToList">
             Back to My VMs
@@ -405,6 +496,9 @@ else
     private string? _consoleError;
     private string? _currentConsoleSessionId;
 
+    private bool _canDelete;
+    private bool _canManageResources;
+
     private CancellationTokenSource? _statusRefreshCts;
 
     private VmResourceLimitsOptions _limits = new VmResourceLimitsOptions();
@@ -427,6 +521,7 @@ else
         await base.OnInitializedAsync();
         _limits = VmLimitsOptions.Value;
         await LoadVmAsync();
+        await LoadPermissionsAsync();
         StartStatusRefreshLoop();
     }
 
@@ -1033,6 +1128,269 @@ else
         double ratio = (double)_vm.DiskGiB / _effectiveMaxDiskGiB;
         int pct = (int)Math.Round(100.0 * ratio);
         return Math.Max(0, Math.Min(100, pct));
+    }
+
+
+    private async Task LoadPermissionsAsync()
+    {
+        _canDelete = false;
+        _canManageResources = false;
+        _primaryOwnerName = null;
+        _vmPermissions.Clear();
+        _permissionError = null;
+
+        if (_vm == null || string.IsNullOrEmpty(CurrentUserId))
+        {
+            return;
+        }
+
+        // Resolve current user DB record
+        VmPortal.Domain.Users.User? currentUser =
+            await Db.Users.FirstOrDefaultAsync(u => u.ExternalId == CurrentUserId);
+
+        if (currentUser == null)
+        {
+            return;
+        }
+
+        Guid currentUserDbId = currentUser.Id;
+
+        // Load primary owner name for display
+        if (_vm.OwnerUserId != Guid.Empty)
+        {
+            VmPortal.Domain.Users.User? owner =
+                await Db.Users.FirstOrDefaultAsync(u => u.Id == _vm.OwnerUserId);
+
+            if (owner != null)
+            {
+                if (!string.IsNullOrWhiteSpace(owner.DisplayName))
+                {
+                    _primaryOwnerName = owner.DisplayName;
+                }
+                else if (!string.IsNullOrWhiteSpace(owner.Email))
+                {
+                    _primaryOwnerName = owner.Email;
+                }
+                else if (!string.IsNullOrWhiteSpace(owner.ExternalId))
+                {
+                    _primaryOwnerName = owner.ExternalId;
+                }
+                else
+                {
+                    _primaryOwnerName = "Owner";
+                }
+            }
+        }
+
+        // Permissions for current user (non-admin)
+        if (_vm.OwnerUserId == currentUserDbId)
+        {
+            _canDelete = true;
+            _canManageResources = true;
+        }
+        else
+        {
+            VmUserPermission? perm = await Db.VmUserPermissions
+                .FirstOrDefaultAsync(p => p.VmId == _vm.Id && p.UserId == currentUserDbId);
+
+            if (perm != null)
+            {
+                _canDelete = perm.CanDelete;
+                _canManageResources = perm.CanManageResources;
+            }
+        }
+
+        // Load all permissions for display (admin card)
+        List<VmUserPermission> perms = await Db.VmUserPermissions
+            .Where(p => p.VmId == _vm.Id)
+            .ToListAsync();
+
+        if (perms.Count > 0)
+        {
+            List<Guid> userIds = perms.Select(p => p.UserId).Distinct().ToList();
+            List<VmPortal.Domain.Users.User> users = await Db.Users
+                .Where(u => userIds.Contains(u.Id))
+                .ToListAsync();
+
+            Dictionary<Guid, VmPortal.Domain.Users.User> userIndex =
+                users.ToDictionary(u => u.Id);
+
+            foreach (VmUserPermission p in perms)
+            {
+                if (!userIndex.TryGetValue(p.UserId, out VmPortal.Domain.Users.User? u) || u == null)
+                {
+                    continue;
+                }
+
+                VmPermissionDisplay display = new VmPermissionDisplay
+                {
+                    PermissionId = p.Id,
+                    UserId = p.UserId,
+                    UserDisplayName = !string.IsNullOrWhiteSpace(u.DisplayName)
+                        ? u.DisplayName
+                        : (u.Email ?? string.Empty),
+                    UserEmail = u.Email ?? string.Empty,
+                    CanDelete = p.CanDelete,
+                    CanManageResources = p.CanManageResources
+                };
+
+                _vmPermissions.Add(display);
+            }
+        }
+    }
+
+    private string? _primaryOwnerName;
+
+    private sealed class VmPermissionDisplay
+    {
+        public Guid PermissionId { get; set; }
+        public Guid UserId { get; set; }
+        public string UserDisplayName { get; set; } = string.Empty;
+        public string UserEmail { get; set; } = string.Empty;
+        public bool CanDelete { get; set; }
+        public bool CanManageResources { get; set; }
+    }
+
+    private List<VmPermissionDisplay> _vmPermissions = new List<VmPermissionDisplay>();
+
+    private string _newPermissionUserInput = string.Empty;
+    private string? _permissionError;
+    private bool _permissionsBusy;
+
+
+    private async Task AddPermissionAsync()
+    {
+        if (_vm == null || string.IsNullOrWhiteSpace(_newPermissionUserInput))
+        {
+            _permissionError = "Please enter an email or display name.";
+            return;
+        }
+
+        _permissionsBusy = true;
+        _permissionError = null;
+        StateHasChanged();
+
+        try
+        {
+            string query = _newPermissionUserInput.Trim();
+
+            // Find user by email first, then by DisplayName
+            VmPortal.Domain.Users.User? user =
+                await Db.Users.FirstOrDefaultAsync(u => u.Email == query);
+
+            if (user == null)
+            {
+                user = await Db.Users.FirstOrDefaultAsync(u => u.DisplayName == query);
+            }
+
+            if (user == null)
+            {
+                _permissionError = "No user found with that email or display name.";
+                return;
+            }
+
+            if (user.Id == _vm.OwnerUserId)
+            {
+                _permissionError = "The primary owner already has full access.";
+                return;
+            }
+
+            bool alreadyExists = await Db.VmUserPermissions
+                .AnyAsync(p => p.VmId == _vm.Id && p.UserId == user.Id);
+
+            if (alreadyExists)
+            {
+                _permissionError = "This user already has permissions for this VM.";
+                return;
+            }
+
+            VmUserPermission perm = new VmUserPermission
+            {
+                Id = Guid.NewGuid(),
+                VmId = _vm.Id,
+                UserId = user.Id,
+                IsPrimaryOwner = false,
+                CanDelete = false,
+                CanManageResources = false,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            Db.VmUserPermissions.Add(perm);
+            await Db.SaveChangesAsync();
+
+            _newPermissionUserInput = string.Empty;
+            await LoadPermissionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to add VM permission for VM {VmId}", _vm.Id);
+            _permissionError = "Failed to add user permission.";
+        }
+        finally
+        {
+            _permissionsBusy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleDeletePermissionAsync(Guid permissionId)
+    {
+        if (_vm == null)
+        {
+            return;
+        }
+
+        VmUserPermission? perm = await Db.VmUserPermissions
+            .FirstOrDefaultAsync(p => p.Id == permissionId && p.VmId == _vm.Id);
+
+        if (perm == null)
+        {
+            return;
+        }
+
+        perm.CanDelete = !perm.CanDelete;
+        await Db.SaveChangesAsync();
+        await LoadPermissionsAsync();
+    }
+
+    private async Task ToggleManagePermissionAsync(Guid permissionId)
+    {
+        if (_vm == null)
+        {
+            return;
+        }
+
+        VmUserPermission? perm = await Db.VmUserPermissions
+            .FirstOrDefaultAsync(p => p.Id == permissionId && p.VmId == _vm.Id);
+
+        if (perm == null)
+        {
+            return;
+        }
+
+        perm.CanManageResources = !perm.CanManageResources;
+        await Db.SaveChangesAsync();
+        await LoadPermissionsAsync();
+    }
+
+    private async Task RemovePermissionAsync(Guid permissionId)
+    {
+        if (_vm == null)
+        {
+            return;
+        }
+
+        VmUserPermission? perm = await Db.VmUserPermissions
+            .FirstOrDefaultAsync(p => p.Id == permissionId && p.VmId == _vm.Id);
+
+        if (perm == null)
+        {
+            return;
+        }
+
+        Db.VmUserPermissions.Remove(perm);
+        await Db.SaveChangesAsync();
+        await LoadPermissionsAsync();
     }
 
 }

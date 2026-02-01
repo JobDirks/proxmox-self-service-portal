@@ -24,5 +24,10 @@ namespace VmPortal.Domain.Vms
 
         public Guid OwnerUserId { get; set; }
         public User? Owner { get; set; }
+
+        public bool IsDisabled { get; set; }
+        public DateTimeOffset? DisabledAt { get; set; }
+        public bool IsDeleted { get; set; }
+        public DateTimeOffset? DeletedAt { get; set; }
     }
 }
