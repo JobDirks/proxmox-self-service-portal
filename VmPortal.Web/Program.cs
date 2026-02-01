@@ -202,6 +202,13 @@ builder.Services.AddAuthorization(options =>
 
 WebApplication app = builder.Build();
 
+// Ensure database exists and apply migrations
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    VmPortalDbContext dbContext = scope.ServiceProvider.GetRequiredService<VmPortalDbContext>();
+    dbContext.Database.Migrate();
+}
+
 // Security middleware pipeline
 if (!app.Environment.IsDevelopment())
 {

@@ -17,23 +17,27 @@ logs/
 secrets.json
 appsettings.*.local.json
 
+# Local environment & user secrets
+.env
+*.user
+
 # SQLite and data
 *.db
-#data/
-vmportal.db
-
-# Node artifacts (if used later)
-node_modules/
-dist/
-
-# SQLite DB
-/VmPortal.Web/data/vmportal.db
-/VmPortal.Web/data/*.db
-/VmPortal.Web/data/
 *.sqlite
-/VmPortal.Web/data/*
+
+# Root data folder (SQLite DB etc.)
+/data/
+/vmportal.db
+
+# If you want to keep the data folder structure in repo, create /data/.gitkeep
+# and then:
+!/data/.gitkeep
+
+# Old Web data folder (kept ignored for safety, even if unused now)
+/VmPortal.Web/data/
+/VmPortal.Web/data/*.db
 !/VmPortal.Web/data/.gitkeep
 
-# User secrets and local env
-*.user
-.env
+# Node artifacts (if added later)
+node_modules/
+dist/

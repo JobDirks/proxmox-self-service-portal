@@ -18,7 +18,7 @@ window.vmConsole = (function () {
         }
 
         const base = window.location.origin;
-        const path = `ws/console/${sessionId}`;
+        const path = buildConsolePath(sessionId);
 
         const url =
             `${base}/novnc/vnc_lite.html?` +
@@ -27,6 +27,9 @@ window.vmConsole = (function () {
             `&scale=true`;
 
         console.log("vmConsole: loading noVNC URL", url);
+
+        // THIS is the crucial line that was missing:
+        iframe.src = url;
 
         // Optional: clear previous status in parent
         if (window.parent && window.parent.vmConsoleStatus) {

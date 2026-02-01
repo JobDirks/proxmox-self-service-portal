@@ -1,0 +1,47 @@
+services:
+  vmportal-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vmportal-web:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+
+      # === SECURITY ===
+      Security__SessionSecretKey: ${Security__SessionSecretKey}
+
+      # === PROXMOX API ===
+      Proxmox__BaseUrl: ${Proxmox__BaseUrl}
+      Proxmox__TokenId: ${Proxmox__TokenId}
+      Proxmox__TokenSecret: ${Proxmox__TokenSecret}
+      Proxmox__DevIgnoreCertErrors: ${Proxmox__DevIgnoreCertErrors:-true}
+
+      # === PROXMOX CONSOLE (VNC) ===
+      ProxmoxConsole__Username: ${ProxmoxConsole__Username}
+      ProxmoxConsole__Password: ${ProxmoxConsole__Password}
+
+      # === PROXMOX TAGS (nested under Proxmox:Tags) ===
+      Proxmox__Tags__ManagedVmTag: ${Proxmox__Tags__ManagedVmTag:-vmportal-managed}
+      Proxmox__Tags__TemplateTag: ${Proxmox__Tags__TemplateTag:-vmportal-template}
+      Proxmox__Tags__TemplateNameTagPrefix: ${Proxmox__Tags__TemplateNameTagPrefix:-tmpl-}
+
+      # === VM RESOURCE LIMITS (optional overrides) ===
+      VmResourceLimits__MaxCpuCores: ${VmResourceLimits__MaxCpuCores:-8}
+      VmResourceLimits__MaxMemoryMiB: ${VmResourceLimits__MaxMemoryMiB:-16384}
+      VmResourceLimits__MaxDiskGiB: ${VmResourceLimits__MaxDiskGiB:-120}
+
+      # === CONNECTION STRING ===
+      ConnectionStrings__Default: ${ConnectionStrings__Default:-Data Source=./data/vmportal.db}
+
+      # === AZURE AD / ENTRA ID ===
+      AzureAd__Instance: ${AzureAd__Instance:-https://login.microsoftonline.com/}
+      AzureAd__TenantId: ${AzureAd__TenantId}
+      AzureAd__ClientId: ${AzureAd__ClientId}
+      AzureAd__ClientSecret: ${AzureAd__ClientSecret}
+      AzureAd__CallbackPath: ${AzureAd__CallbackPath:-/signin-oidc}
+
+    volumes:
+      # SQLite DB and any data, relative to /app
+      - ./data:/app/data
