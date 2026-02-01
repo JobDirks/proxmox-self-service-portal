@@ -12,6 +12,7 @@
 @using System.Linq
 @using VmPortal.Application.Proxmox
 @inject Microsoft.Extensions.Options.IOptions<ProxmoxTagOptions> TagOptions
+@using System.Text.RegularExpressions
 
 @inject IProxmoxClient Proxmox
 
@@ -324,6 +325,7 @@ else
         _maxDiskGiB = template.MaxDiskGiB;
         _description = template.Description;
         _isActive = template.IsActive;
+        _templateTagName = template.TemplateTagName;
         _validationError = null;
     }
 
@@ -342,6 +344,7 @@ else
         _maxDiskGiB = null;
         _description = null;
         _isActive = true;
+        _templateTagName = null;
         _validationError = null;
     }
 
@@ -446,6 +449,53 @@ else
                 return;
             }
 
+            string? normalizedTemplateTagName = null;
+
+            if (!string.IsNullOrWhiteSpace(_templateTagName))
+            {
+                string rawTag = _templateTagName.Trim();
+
+                // Allowed characters: letters, numbers, _+.-:, no spaces
+                Regex tagRegex = new Regex("^[A-Za-z0-9_+\\.\\-:]+$");
+
+                if (!tagRegex.IsMatch(rawTag))
+                {
+                    _validationError = "Template tag is invalid. Only letters, numbers, and _+.-: are allowed, no spaces.";
+                    _saving = false;
+                    return;
+                }
+
+                // Strip prefix if the admin typed it (to avoid double-prefix in DB)
+                string? prefix = _tagOptions.TemplateNameTagPrefix;
+                if (!string.IsNullOrEmpty(prefix) &&
+                    rawTag.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    rawTag = rawTag.Substring(prefix.Length);
+                }
+
+                // Prevent using system tags directly as the template tag
+                string? managedTag = _tagOptions.ManagedVmTag;
+                if (!string.IsNullOrEmpty(managedTag) &&
+                    rawTag.Equals(managedTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    _validationError = "This tag is reserved for system use.";
+                    _saving = false;
+                    return;
+                }
+
+                string? systemTemplateTag = _tagOptions.TemplateTag;
+                if (!string.IsNullOrEmpty(systemTemplateTag) &&
+                    rawTag.Equals(systemTemplateTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    _validationError = "This tag is reserved for system use.";
+                    _saving = false;
+                    return;
+                }
+
+                // Normalize for consistency (you can keep original casing if you prefer)
+                normalizedTemplateTagName = rawTag.ToLowerInvariant();
+            }
+
             if (_editingTemplateId.HasValue)
             {
                 VmTemplate? existing = await Db.VmTemplates.FirstOrDefaultAsync(t => t.Id == _editingTemplateId.Value);
@@ -466,7 +516,7 @@ else
                 existing.MaxCpuCores = _maxCpu;
                 existing.MaxMemoryMiB = _maxMemoryMiB;
                 existing.MaxDiskGiB = _maxDiskGiB;
-                existing.TemplateTagName = _templateTagName;
+                existing.TemplateTagName = normalizedTemplateTagName;
                 existing.Description = _description;
                 existing.IsActive = _isActive;
 
@@ -488,6 +538,8 @@ else
                     $"Template: {existing.Name} ({existing.TemplateVmId})", "Information");
 
                 await PropagateTemplateLimitsToVmsAsync(existing);
+                await PropagateTemplateTagsToVmsAsync(existing);
+
             }
             else
             {
@@ -504,7 +556,7 @@ else
                     MaxCpuCores = _maxCpu,
                     MaxMemoryMiB = _maxMemoryMiB,
                     MaxDiskGiB = _maxDiskGiB,
-                    TemplateTagName = _templateTagName,
+                    TemplateTagName = normalizedTemplateTagName,
                     Description = _description,
                     IsActive = _isActive,
                     CreatedAt = DateTimeOffset.UtcNow
@@ -544,6 +596,7 @@ else
         }
     }
 
+
     private async Task PropagateTemplateLimitsToVmsAsync(VmTemplate template)
     {
         // Update all VMs cloned from this template (same TemplateVmId and Node)
@@ -566,9 +619,62 @@ else
             "Information");
     }
 
+    private async Task PropagateTemplateTagsToVmsAsync(VmTemplate template)
+    {
+        // All VMs cloned from this template on the same node
+        List<Vm> vms = await Db.Vms
+            .Where(v => v.TemplateVmId == template.TemplateVmId && v.Node == template.Node && !v.IsDeleted)
+            .ToListAsync();
+
+        if (vms.Count == 0)
+        {
+            return;
+        }
+
+        Int32 updatedCount = 0;
+
+        // Build the desired tags for child VMs (same as clone-time tags)
+        List<String> desiredTags = new List<String>();
+
+        if (!String.IsNullOrWhiteSpace(_tagOptions.ManagedVmTag))
+        {
+            desiredTags.Add(_tagOptions.ManagedVmTag);
+        }
+
+        if (!String.IsNullOrWhiteSpace(template.TemplateTagName) &&
+            !String.IsNullOrWhiteSpace(_tagOptions.TemplateNameTagPrefix))
+        {
+            String templateNameTag = _tagOptions.TemplateNameTagPrefix + template.TemplateTagName;
+            desiredTags.Add(templateNameTag);
+        }
+
+        foreach (Vm vm in vms)
+        {
+            try
+            {
+                await Proxmox.SetVmTagsAsync(vm.Node, vm.VmId, desiredTags, default);
+                updatedCount++;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(
+                    ex,
+                    "Failed to propagate template tags to VM {VmId} on node {Node} for template {TemplateVmId}",
+                    vm.VmId,
+                    vm.Node,
+                    template.TemplateVmId);
+            }
+        }
+
+        await LogSecurityEventAsync(
+            "AdminTemplateTagsPropagated",
+            $"Template: {Sanitizer.SanitizeForLog(template.Name)} ({template.TemplateVmId}), VMs updated: {updatedCount}",
+            "Information");
+    }
+
     private IEnumerable<string> BuildTemplateVmTags(VmTemplate template)
     {
-        List<string> tags = new List<string>();
+        HashSet<string> tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (!string.IsNullOrWhiteSpace(_tagOptions.ManagedVmTag))
         {

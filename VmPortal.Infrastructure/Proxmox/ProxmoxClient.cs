@@ -18,11 +18,18 @@ namespace VmPortal.Infrastructure.Proxmox
 
         private readonly ProxmoxConsoleOptions _consoleOpt;
 
-        public ProxmoxClient(HttpClient http, IOptions<ProxmoxOptions> options, IOptions<ProxmoxConsoleOptions> consoleOptions)
+        private readonly ProxmoxTagOptions _tagOpt;
+
+        public ProxmoxClient(
+            HttpClient http,
+            IOptions<ProxmoxOptions> options,
+            IOptions<ProxmoxConsoleOptions> consoleOptions,
+            IOptions<ProxmoxTagOptions> tagOptions)
         {
             _http = http;
             _opt = options.Value;
             _consoleOpt = consoleOptions.Value;
+            _tagOpt = tagOptions.Value;
 
             if (!_http.DefaultRequestHeaders.Contains("Authorization"))
             {
@@ -597,13 +604,14 @@ namespace VmPortal.Infrastructure.Proxmox
                 throw new ArgumentOutOfRangeException(nameof(vmId), "VMID must be positive.");
             }
 
-            // First, get existing tags from VM config
+            // 1) Get existing tags from VM config
             string url = $"nodes/{Uri.EscapeDataString(node)}/qemu/{vmId}/config";
             using HttpResponseMessage getResp = await _http.GetAsync(url, ct);
             getResp.EnsureSuccessStatusCode();
 
             JsonDocument? doc = await getResp.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken: ct);
-            HashSet<string> mergedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            List<string> existingTags = new List<string>();
 
             if (doc != null)
             {
@@ -615,13 +623,13 @@ namespace VmPortal.Infrastructure.Proxmox
                         string? existingTagString = tagsElement.GetString();
                         if (!string.IsNullOrWhiteSpace(existingTagString))
                         {
-                            string[] existingTags = existingTagString.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                            foreach (string tag in existingTags)
+                            string[] split = existingTagString.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                            foreach (string tag in split)
                             {
                                 string trimmed = tag.Trim();
                                 if (trimmed.Length > 0)
                                 {
-                                    mergedTags.Add(trimmed);
+                                    existingTags.Add(trimmed);
                                 }
                             }
                         }
@@ -629,7 +637,48 @@ namespace VmPortal.Infrastructure.Proxmox
                 }
             }
 
-            // Add new tags
+            // 2) Remove old template-name tags and system tags from existing list
+
+            string? prefix = _tagOpt.TemplateNameTagPrefix;
+            string? managedTag = _tagOpt.ManagedVmTag;
+            string? templateSystemTag = _tagOpt.TemplateTag;
+
+            List<string> cleanedTags = new List<string>();
+
+            foreach (string tag in existingTags)
+            {
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    continue;
+                }
+
+                string trimmed = tag.Trim();
+
+                Boolean isTemplateNameTag =
+                    !string.IsNullOrEmpty(prefix) &&
+                    trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+
+                Boolean isManagedTag =
+                    !string.IsNullOrEmpty(managedTag) &&
+                    trimmed.Equals(managedTag, StringComparison.OrdinalIgnoreCase);
+
+                Boolean isTemplateSystemTag =
+                    !string.IsNullOrEmpty(templateSystemTag) &&
+                    trimmed.Equals(templateSystemTag, StringComparison.OrdinalIgnoreCase);
+
+                // Skip old template-related tags; we will re-add the desired ones from 'tags'
+                if (isTemplateNameTag || isManagedTag || isTemplateSystemTag)
+                {
+                    continue;
+                }
+
+                cleanedTags.Add(trimmed);
+            }
+
+            // 3) Add desired tags from 'tags' parameter, de-duplicated
+
+            HashSet<string> mergedTags = new HashSet<string>(cleanedTags, StringComparer.OrdinalIgnoreCase);
+
             foreach (string t in tags)
             {
                 if (!string.IsNullOrWhiteSpace(t))

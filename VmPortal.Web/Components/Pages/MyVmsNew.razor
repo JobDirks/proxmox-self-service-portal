@@ -739,30 +739,61 @@ else
             _stageMessage = "Saving VM in portal database...";
             StateHasChanged();
 
-            Vm vm = new Vm
+            String node = template.Node;
+            String vmName = name;
+            Guid ownerUserId = _currentUserDbId;
+            Int32 cpuCores = _model.CpuCores;
+            Int32 memoryMiB = _model.MemoryMiB;
+            Int32 diskGiB = _model.DiskGiB;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            // Check if a VM with this Node/VmId is already tracked (from a previous run or sync)
+            Vm? existingVm = await Db.Vms
+                .SingleOrDefaultAsync(v => v.Node == node && v.VmId == newVmId);
+
+            if (existingVm != null)
             {
-                Id = Guid.NewGuid(),
-                VmId = newVmId,
-                Node = template.Node,
-                Name = name,
-                Status = VmStatus.Stopped,
+                // Reactivate/update existing VM record
+                existingVm.Name = vmName;
+                existingVm.OwnerUserId = ownerUserId;
+                existingVm.CpuCores = cpuCores;
+                existingVm.MemoryMiB = memoryMiB;
+                existingVm.DiskGiB = diskGiB;
+                existingVm.Status = VmStatus.Stopped;
+                existingVm.IsDeleted = false;
+                existingVm.IsDisabled = false;
+                existingVm.TemplateId = template.Id;
+                existingVm.TemplateVmId = template.TemplateVmId;
+                existingVm.LastStatusChangeAt = now;
+                existingVm.LastSyncedAt = now;
+            }
+            else
+            {
+                // Create new VM record
+                Vm vm = new Vm
+                {
+                    Id = Guid.NewGuid(),
+                    Node = node,
+                    VmId = newVmId,
+                    Name = vmName,
+                    OwnerUserId = ownerUserId,
+                    CpuCores = cpuCores,
+                    MemoryMiB = memoryMiB,
+                    DiskGiB = diskGiB,
+                    Status = VmStatus.Stopped,
+                    IsDeleted = false,
+                    IsDisabled = false,
+                    TemplateId = template.Id,
+                    TemplateVmId = template.TemplateVmId,
+                    LastStatusChangeAt = now,
+                    LastSyncedAt = now,
+                    TotalRunTimeSeconds = 0
+                };
 
-                CpuCores = _model.CpuCores,
-                MemoryMiB = _model.MemoryMiB,
-                DiskGiB = _model.DiskGiB,
+                Db.Vms.Add(vm);
+            }
 
-                // Link back to template + copy max limits
-                TemplateId = template.Id,
-                TemplateVmId = template.TemplateVmId,
-                MaxCpuCores = template.MaxCpuCores,
-                MaxMemoryMiB = template.MaxMemoryMiB,
-                MaxDiskGiB = template.MaxDiskGiB,
-
-                LastSyncedAt = DateTimeOffset.UtcNow,
-                OwnerUserId = _currentUserDbId
-            };
-
-            Db.Vms.Add(vm);
+            // Single SaveChangesAsync, no cancellationToken here
             await Db.SaveChangesAsync();
 
             await LogSecurityEventAsync("VmCreatedFromTemplate",
