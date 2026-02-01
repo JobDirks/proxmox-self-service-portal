@@ -1,0 +1,8 @@
+namespace VmPortal.Application.Security
+{
+    public sealed class SecurityEventRetentionOptions
+    {
+        public int RetentionDays { get; set; } = 365;
+        public int CleanupIntervalHours { get; set; } = 24;
+    }
+}

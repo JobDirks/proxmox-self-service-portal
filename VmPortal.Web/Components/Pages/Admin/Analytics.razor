@@ -1,0 +1,430 @@
+@page "/admin/analytics"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Policy = VmPortal.Domain.Security.SecurityConstants.Policies.Admin)]
+@inherits SecureComponentBase
+@using System
+@using System.Linq
+@using Microsoft.EntityFrameworkCore
+@using VmPortal.Infrastructure.Data
+@using VmPortal.Domain.Vms
+@using VmPortal.Domain.Users
+@using VmPortal.Domain.Security
+@inject VmPortalDbContext Db
+
+<PageTitle>Analytics Dashboard</PageTitle>
+
+<h1 class="h4 mb-3">Analytics Dashboard</h1>
+
+@if (_loading)
+{
+    <div class="d-flex justify-content-center py-4">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger py-2">
+        @_error
+    </div>
+}
+else
+{
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_totalUsers</h3>
+                    <p class="text-muted small mb-1">Total Users</p>
+                    <div class="progress" style="height: 4px;">
+                        <div class="progress-bar bg-primary" role="progressbar" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_activeUsers7d</h3>
+                    <p class="text-muted small mb-1">Active last 7 days</p>
+                    <small class="text-muted">
+                        @GetUserPercentage(_activeUsers7d)% of users
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_activeUsers30d</h3>
+                    <p class="text-muted small mb-1">Active last 30 days</p>
+                    <small class="text-muted">
+                        @GetUserPercentage(_activeUsers30d)% of users
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_activeUsersCurrent</h3>
+                    <p class="text-muted small mb-1">Currently active</p>
+                    <small class="text-muted">
+                        (last 15 minutes)
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_totalVms</h3>
+                    <p class="text-muted small mb-1">Total VMs</p>
+                    <div class="progress" style="height: 4px;">
+                        <div class="progress-bar bg-primary" role="progressbar" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_runningVms</h3>
+                    <p class="text-muted small mb-1">Running</p>
+                    <small class="text-muted">
+                        @GetVmPercentage(_runningVms)% of VMs
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_disabledVms</h3>
+                    <p class="text-muted small mb-1">Disabled</p>
+                    <small class="text-muted">
+                        @GetVmPercentage(_disabledVms)% of VMs
+                    </small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="mb-0">@_deletedVms</h3>
+                    <p class="text-muted small mb-1">Deleted</p>
+                    <small class="text-muted">
+                        (logical)
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    User Activity (last year)
+                </div>
+                <div class="card-body">
+                    <p class="small mb-1">
+                        Active in last 7 days: <strong>@_activeUsers7d</strong>
+                        (@GetUserPercentage(_activeUsers7d)% of users)
+                    </p>
+                    <div class="progress mb-2" style="height: 6px;">
+                        <div class="progress-bar bg-success" role="progressbar"
+                             style="width: @GetUserPercentage(_activeUsers7d)%;">
+                        </div>
+                    </div>
+
+                    <p class="small mb-1">
+                        Active in last 30 days: <strong>@_activeUsers30d</strong>
+                        (@GetUserPercentage(_activeUsers30d)% of users)
+                    </p>
+                    <div class="progress mb-2" style="height: 6px;">
+                        <div class="progress-bar bg-info" role="progressbar"
+                             style="width: @GetUserPercentage(_activeUsers30d)%;">
+                        </div>
+                    </div>
+
+                    <p class="small mb-1">
+                        Active in last 90 days: <strong>@_activeUsers90d</strong>
+                        (@GetUserPercentage(_activeUsers90d)% of users)
+                    </p>
+                    <div class="progress mb-2" style="height: 6px;">
+                        <div class="progress-bar bg-warning" role="progressbar"
+                             style="width: @GetUserPercentage(_activeUsers90d)%;">
+                        </div>
+                    </div>
+
+                    <p class="small mb-1">
+                        Active in last 365 days: <strong>@_activeUsers365d</strong>
+                        (@GetUserPercentage(_activeUsers365d)% of users)
+                    </p>
+                    <div class="progress mb-2" style="height: 6px;">
+                        <div class="progress-bar bg-secondary" role="progressbar"
+                             style="width: @GetUserPercentage(_activeUsers365d)%;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-body">
+            <p class="small mb-1">
+                Running now: <strong>@_runningVms</strong> (@GetVmPercentage(_runningVms)% of VMs)
+            </p>
+            <div class="progress mb-2" style="height: 6px;">
+                <div class="progress-bar bg-success" role="progressbar"
+                     style="width: @GetVmPercentage(_runningVms)%;">
+                </div>
+            </div>
+
+            <p class="small mb-1">
+                Disabled: <strong>@_disabledVms</strong> (@GetVmPercentage(_disabledVms)% of VMs)
+            </p>
+            <div class="progress mb-2" style="height: 6px;">
+                <div class="progress-bar bg-warning" role="progressbar"
+                     style="width: @GetVmPercentage(_disabledVms)%;">
+                </div>
+            </div>
+
+            <p class="small mb-1">
+                Deleted: <strong>@_deletedVms</strong> (@GetVmPercentage(_deletedVms)% of VMs)
+            </p>
+            <div class="progress mb-2" style="height: 6px;">
+                <div class="progress-bar bg-danger" role="progressbar"
+                     style="width: @GetVmPercentage(_deletedVms)%;">
+                </div>
+            </div>
+
+            <hr />
+
+            <p class="small mb-1">
+                Total VM runtime: <strong>@_totalRuntimeHours.ToString("F1") h</strong>
+            </p>
+            <p class="small mb-3">
+                Average runtime per VM: <strong>@_averageRuntimeHours.ToString("F1") h</strong>
+            </p>
+
+            <p class="small mb-1">
+                Last VM interaction:
+                @if (_lastVmInteraction.HasValue)
+                {
+                    <strong>@_lastVmInteraction.Value.ToString("u")</strong>
+                }
+                else
+                {
+                    <span class="text-muted">no VM events recorded yet</span>
+                }
+            </p>
+
+            <hr />
+
+            <p class="small mb-1">
+                Low-usage VMs (candidates for cleanup)
+            </p>
+            @if (_lowUsageVms.Count > 0)
+            {
+                <ul class="small mb-0">
+                    @foreach (LowUsageVmInfo vm in _lowUsageVms)
+                    {
+                        <li>
+                            <strong>@vm.Name</strong> —
+                            @vm.TotalHours.ToString("F1") h total,
+                            last status change:
+                            @if (vm.LastStatusChangeAt.HasValue)
+                            {
+                                @vm.LastStatusChangeAt.Value.ToString("u")
+                            }
+                            else
+                            {
+                                <span class="text-muted">n/a</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <p class="small text-muted mb-0">
+                    No obvious low-usage candidates (low runtime and inactive for 90+ days).
+                </p>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+
+    private int _totalUsers;
+    private int _activeUsersCurrent;
+    private int _activeUsers7d;
+    private int _activeUsers30d;
+    private int _activeUsers90d;
+    private int _activeUsers365d;
+
+    private int _totalVms;
+    private int _runningVms;
+    private int _disabledVms;
+    private int _deletedVms;
+
+    private DateTimeOffset? _lastVmInteraction;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+        await LoadAnalyticsAsync();
+    }
+
+    private async Task LoadAnalyticsAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset windowCurrent = now.AddMinutes(-15);
+            DateTimeOffset window7d = now.AddDays(-7);
+            DateTimeOffset window30d = now.AddDays(-30);
+            DateTimeOffset window90d = now.AddDays(-90);
+            DateTimeOffset window365d = now.AddDays(-365);
+
+            // Users
+            _totalUsers = await Db.Users.CountAsync();
+
+            IQueryable<SecurityEvent> eventsQuery = Db.SecurityEvents.AsNoTracking();
+
+            _activeUsersCurrent = await eventsQuery
+                .Where(e => e.OccurredAt >= windowCurrent && !string.IsNullOrEmpty(e.UserId))
+                .Select(e => e.UserId!)
+                .Distinct()
+                .CountAsync();
+
+            _activeUsers7d = await eventsQuery
+                .Where(e => e.OccurredAt >= window7d && !string.IsNullOrEmpty(e.UserId))
+                .Select(e => e.UserId!)
+                .Distinct()
+                .CountAsync();
+
+            _activeUsers30d = await eventsQuery
+                .Where(e => e.OccurredAt >= window30d && !string.IsNullOrEmpty(e.UserId))
+                .Select(e => e.UserId!)
+                .Distinct()
+                .CountAsync();
+
+            _activeUsers90d = await eventsQuery
+                .Where(e => e.OccurredAt >= window90d && !string.IsNullOrEmpty(e.UserId))
+                .Select(e => e.UserId!)
+                .Distinct()
+                .CountAsync();
+
+            _activeUsers365d = await eventsQuery
+                .Where(e => e.OccurredAt >= window365d && !string.IsNullOrEmpty(e.UserId))
+                .Select(e => e.UserId!)
+                .Distinct()
+                .CountAsync();
+
+            // VMs
+            List<Vm> allVms = await Db.Vms.AsNoTracking().ToListAsync();
+
+            _totalVms = allVms.Count;
+            _runningVms = allVms.Count(v => v.Status == VmStatus.Running && !v.IsDeleted);
+            _disabledVms = allVms.Count(v => v.IsDisabled && !v.IsDeleted);
+            _deletedVms = allVms.Count(v => v.IsDeleted);
+
+            // Uptime analytics
+            long totalSeconds = allVms.Sum(v => v.TotalRunTimeSeconds);
+            _totalRuntimeHours = totalSeconds / 3600.0;
+            _averageRuntimeHours = _totalVms > 0 ? _totalRuntimeHours / _totalVms : 0.0;
+
+            // Low-usage VM candidates (e.g., not running, low total runtime, and inactive > 90 days)
+            TimeSpan lowUsageWindow = TimeSpan.FromDays(90);
+            double lowUsageMaxHours = 4.0; // VMs with less than 4 hours total runtime
+
+            _lowUsageVms = allVms
+                .Where(v =>
+                    !v.IsDeleted &&
+                    v.Status != VmStatus.Running &&
+                    v.LastStatusChangeAt.HasValue &&
+                    (now - v.LastStatusChangeAt.Value) > lowUsageWindow &&
+                    v.TotalRunTimeSeconds < lowUsageMaxHours * 3600.0)
+                .OrderByDescending(v => now - v.LastStatusChangeAt!.Value)
+                .Take(10)
+                .Select(v => new LowUsageVmInfo
+                {
+                    Name = v.Name,
+                    TotalHours = v.TotalRunTimeSeconds / 3600.0,
+                    LastStatusChangeAt = v.LastStatusChangeAt
+                })
+                .ToList();
+
+            // Last VM interaction (any security event whose type starts with "Vm")
+            _lastVmInteraction = await eventsQuery
+                .Where(e => e.EventType.StartsWith("Vm", StringComparison.Ordinal))
+                .MaxAsync(e => (DateTimeOffset?)e.OccurredAt);
+
+            await LogSecurityEventAsync(
+                "AdminAnalyticsViewed",
+                "Admin viewed analytics dashboard",
+                "Information");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load analytics data");
+            _error = "Failed to load analytics data. Check logs for details.";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private int GetUserPercentage(int activeCount)
+    {
+        if (_totalUsers <= 0)
+        {
+            return 0;
+        }
+
+        double ratio = (double)activeCount / _totalUsers;
+        int pct = (int)Math.Round(100.0 * ratio);
+        return Math.Max(0, Math.Min(100, pct));
+    }
+
+    private int GetVmPercentage(int count)
+    {
+        if (_totalVms <= 0)
+        {
+            return 0;
+        }
+
+        double ratio = (double)count / _totalVms;
+        int pct = (int)Math.Round(100.0 * ratio);
+        return Math.Max(0, Math.Min(100, pct));
+    }
+
+    private double _totalRuntimeHours;
+    private double _averageRuntimeHours;
+
+    private sealed class LowUsageVmInfo
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public double TotalHours { get; set; }
+
+        public DateTimeOffset? LastStatusChangeAt { get; set; }
+    }
+
+    private List<LowUsageVmInfo> _lowUsageVms = new List<LowUsageVmInfo>();
+}

@@ -29,5 +29,7 @@ namespace VmPortal.Domain.Vms
         public DateTimeOffset? DisabledAt { get; set; }
         public bool IsDeleted { get; set; }
         public DateTimeOffset? DeletedAt { get; set; }
+        public DateTimeOffset? LastStatusChangeAt { get; set; }
+        public long TotalRunTimeSeconds { get; set; }
     }
 }

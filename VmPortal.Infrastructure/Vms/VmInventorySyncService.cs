@@ -139,16 +139,34 @@ namespace VmPortal.Infrastructure.Vms
                 if (!string.IsNullOrWhiteSpace(proxVm.Name) &&
                     !string.Equals(vm.Name, proxVm.Name, StringComparison.Ordinal))
                 {
-                    _logger.LogInformation("Updating VM name from '{Old}' to '{New}' for {VmId}@{Node}",
-                        vm.Name, proxVm.Name, vm.VmId, vm.Node);
+                    _logger.LogInformation("Sync: updating VM name from '{Old}' to '{New}' for {VmId}@{Node}",
+                        vm.Name,
+                        proxVm.Name,
+                        vm.VmId,
+                        vm.Node);
+
                     vm.Name = proxVm.Name;
                     changed = true;
                 }
 
-                // Status sync (optional; you may already update status elsewhere)
-                if (vm.Status == VmStatus.Unknown && proxVm.Status != VmStatus.Unknown)
+                // Status + uptime sync
+                VmStatus oldStatus = vm.Status;
+                VmStatus newStatus = proxVm.Status;
+
+                if (oldStatus != newStatus && newStatus != VmStatus.Unknown)
                 {
-                    vm.Status = proxVm.Status;
+                    // If we are leaving Running, accumulate uptime
+                    if (oldStatus == VmStatus.Running && vm.LastStatusChangeAt.HasValue)
+                    {
+                        TimeSpan delta = now - vm.LastStatusChangeAt.Value;
+                        if (delta.TotalSeconds > 0)
+                        {
+                            vm.TotalRunTimeSeconds += (long)delta.TotalSeconds;
+                        }
+                    }
+
+                    vm.Status = newStatus;
+                    vm.LastStatusChangeAt = now;
                     changed = true;
                 }
 
@@ -180,15 +198,15 @@ namespace VmPortal.Infrastructure.Vms
 
             if (updated > 0)
             {
-                _logger.LogInformation("Updated name/status/resources for {Count} VMs during sync.", updated);
+                _logger.LogInformation("Sync: updated name/status/resources/uptime for {Count} VMs.", updated);
                 await _db.SaveChangesAsync(ct);
             }
         }
 
         private async Task SyncDisabledVmsDeletionAsync(
-    List<Vm> dbVms,
-    Dictionary<(string Node, int VmId), ProxmoxVmInfo> proxmoxIndex,
-    CancellationToken ct)
+            List<Vm> dbVms,
+            Dictionary<(string Node, int VmId), ProxmoxVmInfo> proxmoxIndex,
+            CancellationToken ct)
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             TimeSpan deleteGrace = TimeSpan.FromDays(30); // adjust as needed

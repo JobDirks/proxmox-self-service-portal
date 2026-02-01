@@ -57,6 +57,12 @@ builder.Services.AddHttpClient();
 // Blazor Authentication State Provider
 builder.Services.AddCascadingAuthenticationState();
 
+// Security Events retention configuration
+builder.Services.Configure<SecurityEventRetentionOptions>(
+    builder.Configuration.GetSection("SecurityEvents:Retention"));
+
+builder.Services.AddHostedService<SecurityEventRetentionBackgroundService>();
+
 // VM Resource Limits configuration
 builder.Services.Configure<VmResourceLimitsOptions>(
     builder.Configuration.GetSection("VmResourceLimits"));
